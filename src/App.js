@@ -10,7 +10,6 @@ export default function App() {
   const [stocks, setStocks] = useState([]);
   const [newStock, setNewStock] = useState({
     symbol: '',
-    market: 'US',
     entryPrice: '',
     currentPrice: '',
     volatilityMultiplier: 2.0,
@@ -62,13 +61,8 @@ export default function App() {
     setVolAnalysis(null);
 
     try {
-      // Add market suffix for Canadian stocks
-      const symbolToFetch = newStock.market === 'CA' 
-        ? `${newStock.symbol}.TRT` 
-        : newStock.symbol;
-
       const response = await fetch(
-        `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbolToFetch}&outputsize=compact&apikey=${process.env.REACT_APP_ALPHA_VANTAGE_API_KEY || 'demo'}`
+        `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${newStock.symbol}&outputsize=compact&apikey=${process.env.REACT_APP_ALPHA_VANTAGE_API_KEY || 'demo'}`
       );
       
       const data = await response.json();
@@ -172,7 +166,6 @@ export default function App() {
     const stock = {
       id: Date.now(),
       symbol: newStock.symbol.toUpperCase(),
-      market: newStock.market,
       entryPrice: entry,
       currentPrice: current,
       highestClose: current,
@@ -192,7 +185,6 @@ export default function App() {
     
     setNewStock({
       symbol: '',
-      market: 'US',
       entryPrice: '',
       currentPrice: '',
       volatilityMultiplier: 2.0,
@@ -322,28 +314,16 @@ export default function App() {
           </p>
 
           {/* Add New Stock Form */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">Stock Symbol</label>
               <input
                 type="text"
                 value={newStock.symbol}
                 onChange={(e) => setNewStock({...newStock, symbol: e.target.value.toUpperCase()})}
-                placeholder="e.g., AAPL"
+                placeholder="e.g., AAPL, PMETF"
                 className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
               />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Market</label>
-              <select
-                value={newStock.market}
-                onChange={(e) => setNewStock({...newStock, market: e.target.value})}
-                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
-              >
-                <option value="US">US Market</option>
-                <option value="CA">Canadian Market</option>
-              </select>
             </div>
             
             <div>
@@ -492,12 +472,7 @@ export default function App() {
               >
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-2xl font-bold text-white">{stock.symbol}</h3>
-                      <span className="text-xs bg-slate-700 text-slate-300 px-2 py-1 rounded">
-                        {stock.market === 'CA' ? '🇨🇦 TSX' : '🇺🇸 US'}
-                      </span>
-                    </div>
+                    <h3 className="text-2xl font-bold text-white">{stock.symbol}</h3>
                     <p className="text-slate-400 text-sm">Added {stock.dateAdded}</p>
                   </div>
                   <button
