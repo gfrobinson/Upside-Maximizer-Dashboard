@@ -1,13 +1,13 @@
 {
   "files": {
     "main.css": "/Upside-Maximizer-Dashboard/static/css/main.be19f06f.css",
-    "main.js": "/Upside-Maximizer-Dashboard/static/js/main.d86add04.js",
+    "main.js": "/Upside-Maximizer-Dashboard/static/js/main.0a4a921e.js",
     "index.html": "/Upside-Maximizer-Dashboard/index.html",
     "main.be19f06f.css.map": "/Upside-Maximizer-Dashboard/static/css/main.be19f06f.css.map",
-    "main.d86add04.js.map": "/Upside-Maximizer-Dashboard/static/js/main.d86add04.js.map"
+    "main.0a4a921e.js.map": "/Upside-Maximizer-Dashboard/static/js/main.0a4a921e.js.map"
   },
   "entrypoints": [
     "static/css/main.be19f06f.css",
-    "static/js/main.d86add04.js"
+    "static/js/main.0a4a921e.js"
   ]
 }
