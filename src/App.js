@@ -62,7 +62,7 @@ export default function App() {
 
     try {
       const response = await fetch(
-        `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${newStock.symbol}&outputsize=compact&apikey=${process.env.REACT_APP_ALPHA_VANTAGE_API_KEY || 'demo'}`
+        `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${newStock.symbol}&outputsize=compact&apikey=YIL96BCWV46JKXBR`
       );
       
       const data = await response.json();
