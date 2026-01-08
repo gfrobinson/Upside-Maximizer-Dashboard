@@ -1,6 +1,6 @@
 # Upside Maximizer - Cloud Edition
 
-A powerful stock portfolio tracker for managing winning positions with automated trailing stops. Built with React, Firebase authentication, and GitHub Actions for automated daily price updates.
+A powerful stock portfolio tracker for managing winning positions with automated trailing stops.  Built with React, Firebase authentication, and GitHub Actions for automated daily price updates.
 
 ## Features
 
