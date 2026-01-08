@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, AlertCircle, Plus, Trash2, Bell, Activity, RefreshCw, Save, LogOut as LogOutIcon, User } from 'lucide-react';
+import { TrendingUp, AlertCircle, Plus, Trash2, Bell, Activity, LogOut as LogOutIcon, User } from 'lucide-react';
 import { auth, savePortfolio, getPortfolio, subscribeToPortfolio, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import AuthModal from './AuthModal';
@@ -10,6 +10,7 @@ export default function App() {
   const [stocks, setStocks] = useState([]);
   const [newStock, setNewStock] = useState({
     symbol: '',
+    market: 'US',
     entryPrice: '',
     currentPrice: '',
     volatilityMultiplier: 2.0,
@@ -17,8 +18,9 @@ export default function App() {
   });
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [volAnalysis, setVolAnalysis] = useState(null);
 
   // Listen for auth state changes
   useEffect(() => {
@@ -45,37 +47,107 @@ export default function App() {
     return unsubscribe;
   }, [user]);
 
-  const handleSavePortfolio = async () => {
-    if (!user) return;
-    
-    setSaving(true);
-    try {
-      await savePortfolio(user.uid, {
-        stocks,
-        alerts,
-        lastUpdate: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error('Error saving portfolio:', error);
-      alert('Failed to save portfolio');
-    }
-    setSaving(false);
-  };
-
-  const handleLogOut = async () => {
-    try {
-      await logOut();
-      setStocks([]);
-      setAlerts([]);
-      setLastUpdate(null);
-    } catch (error) {
-      console.error('Error logging out:', error);
-    }
-  };
-
   const calculateStopLoss = (highestClose, typicalVol, multiplier) => {
     const volatilityDecline = typicalVol * multiplier;
     return highestClose * (1 - volatilityDecline / 100);
+  };
+
+  const analyzeVolatility = async () => {
+    if (!newStock.symbol) {
+      alert('Please enter a stock symbol');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setVolAnalysis(null);
+
+    try {
+      // Add market suffix for Canadian stocks
+      const symbolToFetch = newStock.market === 'CA' 
+        ? `${newStock.symbol}.TRT` 
+        : newStock.symbol;
+
+      const response = await fetch(
+        `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbolToFetch}&outputsize=compact&apikey=demo`
+      );
+      
+      const data = await response.json();
+
+      if (data['Note']) {
+        alert('API call limit reached. Please wait a minute and try again.');
+        setIsAnalyzing(false);
+        return;
+      }
+
+      if (data['Error Message']) {
+        alert('Invalid stock symbol. Please check and try again.');
+        setIsAnalyzing(false);
+        return;
+      }
+
+      if (!data['Time Series (Daily)']) {
+        alert('Unable to fetch historical data. Please check the symbol and try again.');
+        setIsAnalyzing(false);
+        return;
+      }
+
+      const timeSeries = data['Time Series (Daily)'];
+      const dates = Object.keys(timeSeries).slice(0, 60);
+      const prices = dates.map(date => parseFloat(timeSeries[date]['4. close']));
+
+      // Find all pullbacks from local highs
+      const pullbacks = [];
+      let currentHigh = prices[0];
+      
+      for (let i = 1; i < prices.length; i++) {
+        if (prices[i] > currentHigh) {
+          currentHigh = prices[i];
+        } else if (prices[i] < currentHigh) {
+          const decline = ((currentHigh - prices[i]) / currentHigh) * 100;
+          if (decline > 2) { // Only count pullbacks > 2%
+            pullbacks.push({
+              date: dates[i],
+              decline: decline,
+              from: currentHigh,
+              to: prices[i]
+            });
+          }
+        }
+      }
+
+      if (pullbacks.length === 0) {
+        alert('Not enough pullback data found in recent history');
+        setIsAnalyzing(false);
+        return;
+      }
+
+      // Calculate typical volatility (middle 50% of pullbacks)
+      pullbacks.sort((a, b) => a.decline - b.decline);
+      const q1 = Math.floor(pullbacks.length * 0.25);
+      const q3 = Math.floor(pullbacks.length * 0.75);
+      const middlePullbacks = pullbacks.slice(q1, q3);
+      
+      const typicalVol = middlePullbacks.reduce((sum, p) => sum + p.decline, 0) / middlePullbacks.length;
+      const avgVol = pullbacks.reduce((sum, p) => sum + p.decline, 0) / pullbacks.length;
+
+      setVolAnalysis({
+        recommended: typicalVol,
+        average: avgVol,
+        pullbacks: pullbacks.slice(0, 10),
+        dataPoints: pullbacks.length
+      });
+
+      setNewStock(prev => ({
+        ...prev,
+        typicalVolatility: Math.round(typicalVol * 10) / 10
+      }));
+
+    } catch (error) {
+      console.error('Error analyzing volatility:', error);
+      alert('Error analyzing volatility. Please try again.');
+    }
+
+    setIsAnalyzing(false);
   };
 
   const addStock = async () => {
@@ -100,6 +172,7 @@ export default function App() {
     const stock = {
       id: Date.now(),
       symbol: newStock.symbol.toUpperCase(),
+      market: newStock.market,
       entryPrice: entry,
       currentPrice: current,
       highestClose: current,
@@ -112,7 +185,6 @@ export default function App() {
     const updatedStocks = [...stocks, stock];
     setStocks(updatedStocks);
     
-    // Auto-save to Firebase
     await savePortfolio(user.uid, {
       stocks: updatedStocks,
       alerts
@@ -120,11 +192,13 @@ export default function App() {
     
     setNewStock({
       symbol: '',
+      market: 'US',
       entryPrice: '',
       currentPrice: '',
       volatilityMultiplier: 2.0,
       typicalVolatility: 10
     });
+    setVolAnalysis(null);
   };
 
   const updateStockPrice = async (id, newPrice) => {
@@ -157,7 +231,6 @@ export default function App() {
 
     setStocks(updatedStocks);
     
-    // Auto-save to Firebase
     await savePortfolio(user.uid, {
       stocks: updatedStocks,
       alerts
@@ -170,11 +243,21 @@ export default function App() {
     const updatedStocks = stocks.filter(stock => stock.id !== id);
     setStocks(updatedStocks);
     
-    // Auto-save to Firebase
     await savePortfolio(user.uid, {
       stocks: updatedStocks,
       alerts
     });
+  };
+
+  const handleLogOut = async () => {
+    try {
+      await logOut();
+      setStocks([]);
+      setAlerts([]);
+      setLastUpdate(null);
+    } catch (error) {
+      console.error('Error logging out:', error);
+    }
   };
 
   const gainPercent = (stock) => {
@@ -239,7 +322,7 @@ export default function App() {
           </p>
 
           {/* Add New Stock Form */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">Stock Symbol</label>
               <input
@@ -249,6 +332,18 @@ export default function App() {
                 placeholder="e.g., AAPL"
                 className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Market</label>
+              <select
+                value={newStock.market}
+                onChange={(e) => setNewStock({...newStock, market: e.target.value})}
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="US">US Market</option>
+                <option value="CA">Canadian Market</option>
+              </select>
             </div>
             
             <div>
@@ -276,37 +371,82 @@ export default function App() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Typical Volatility (%)
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                value={newStock.typicalVolatility}
-                onChange={(e) => setNewStock({...newStock, typicalVolatility: e.target.value})}
-                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
-              />
+          {/* Volatility Analysis */}
+          <div className="mb-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+            <div className="flex items-center gap-2 mb-3">
+              <Activity className="text-emerald-400" size={20} />
+              <h3 className="text-lg font-semibold text-white">Volatility Analysis</h3>
             </div>
             
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Multiplier
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                value={newStock.volatilityMultiplier}
-                onChange={(e) => setNewStock({...newStock, volatilityMultiplier: e.target.value})}
-                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-          </div>
+            <button
+              onClick={analyzeVolatility}
+              disabled={isAnalyzing || !newStock.symbol}
+              className="mb-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
+            >
+              {isAnalyzing ? 'Analyzing...' : `Analyze ${newStock.symbol || 'Stock'} Volatility`}
+            </button>
 
-          <p className="text-xs text-slate-400 mb-4">
-            Stop loss = Highest Close × (1 - (Typical Vol × Multiplier) / 100)
-          </p>
+            {volAnalysis && (
+              <div className="bg-slate-800/50 p-4 rounded-lg space-y-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-slate-400">Recommended Typical Volatility</p>
+                    <p className="text-2xl font-bold text-emerald-400">{volAnalysis.recommended.toFixed(1)}%</p>
+                    <p className="text-xs text-slate-500">Middle 50% of pullbacks</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-400">Average of All Pullbacks</p>
+                    <p className="text-2xl font-bold text-slate-300">{volAnalysis.average.toFixed(1)}%</p>
+                    <p className="text-xs text-slate-500">Based on {volAnalysis.dataPoints} pullbacks</p>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <p className="text-sm font-medium text-slate-300 mb-2">Recent Pullbacks:</p>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {volAnalysis.pullbacks.map((p, i) => (
+                      <div key={i} className="text-xs text-slate-400 flex justify-between">
+                        <span>{p.date}</span>
+                        <span className="text-red-400">-{p.decline.toFixed(1)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4 mt-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Typical Volatility (%)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={newStock.typicalVolatility}
+                  onChange={(e) => setNewStock({...newStock, typicalVolatility: e.target.value})}
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Multiplier
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={newStock.volatilityMultiplier}
+                  onChange={(e) => setNewStock({...newStock, volatilityMultiplier: e.target.value})}
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-400 mt-2">
+              Stop loss will be set at: Highest Close × (1 - (Typical Vol × Multiplier) / 100)
+            </p>
+          </div>
 
           <button
             onClick={addStock}
@@ -352,7 +492,12 @@ export default function App() {
               >
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <h3 className="text-2xl font-bold text-white">{stock.symbol}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-2xl font-bold text-white">{stock.symbol}</h3>
+                      <span className="text-xs bg-slate-700 text-slate-300 px-2 py-1 rounded">
+                        {stock.market === 'CA' ? '🇨🇦 TSX' : '🇺🇸 US'}
+                      </span>
+                    </div>
                     <p className="text-slate-400 text-sm">Added {stock.dateAdded}</p>
                   </div>
                   <button
