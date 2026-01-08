@@ -11,7 +11,7 @@ A powerful stock portfolio tracker for managing winning positions with automated
 ✅ **Smart Trailing Stops** - Volatility-based stops that only trigger on closing prices  
 ✅ **Email Alerts** - Get notified immediately when stops are triggered  
 ✅ **Multi-Device Access** - Hosted on GitHub Pages, accessible anywhere  
-✅ **No Manual Entry** - Set it once, prices update automatically  
+✅ **No Manual Entry** - Set it once, prices update automatical ly  
 
 ## Quick Start 
 
