@@ -13,7 +13,7 @@ A powerful stock portfolio tracker for managing winning positions with automated
 ✅ **Multi-Device Access** - Hosted on GitHub Pages, accessible anywhere  
 ✅ **No Manual Entry** - Set it once, prices update automatically  
 
-## Quick Start
+## Quick Start 
 
 ### Prerequisites
 - Node.js 18+ installed
