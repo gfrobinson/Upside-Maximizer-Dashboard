@@ -1,22 +1,12 @@
 /**
  * Upside Maximizer - Daily Price Update Script
- * 
- * This script runs via GitHub Actions to:
- * 1. Fetch all users' portfolios from Firestore
- * 2. Get current prices for each stock
- * 3. Update currentPrice and highestClose if needed
- * 4. Save back to Firestore
  */
 
 const admin = require('firebase-admin');
 const https = require('https');
 
-// Initialize Firebase Admin
-const serviceAccount = {
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-};
+// Initialize Firebase Admin using full service account JSON
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
