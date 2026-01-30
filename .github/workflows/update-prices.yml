@@ -2,9 +2,8 @@ name: Update Stock Prices
 
 on:
   schedule:
-    # Run at 4:30 PM EST (9:30 PM UTC) on weekdays
     - cron: '30 21 * * 1-5'
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
   update-prices:
@@ -20,10 +19,8 @@ jobs:
           node-version: '18'
           
       - name: Install dependencies
-        run: |
-          cd .github/scripts
-          npm init -y
-          npm install firebase-admin
+        working-directory: .github/scripts
+        run: npm init -y && npm install firebase-admin
         
       - name: Update stock prices
         env:
@@ -32,15 +29,3 @@ jobs:
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
           ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
         run: node .github/scripts/update-prices.js
-```
-
-4. Click **Commit changes**
-
----
-
-### Step 2: Create the script file
-
-1. Click **Add file** → **Create new file**
-2. In the name field, type:
-```
-   .github/scripts/update-prices.js
