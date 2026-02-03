@@ -10,6 +10,7 @@ export default function App() {
   const [stocks, setStocks] = useState([]);
   const [newStock, setNewStock] = useState({
     symbol: '',
+    companyName: '',
     entryPrice: '',
     currentPrice: '',
     volatilityMultiplier: 2.0,
@@ -61,6 +62,7 @@ export default function App() {
     setVolAnalysis(null);
 
     try {
+      // Fetch daily data (includes company name in metadata)
       const response = await fetch(
         `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${newStock.symbol}&outputsize=compact&apikey=YIL96BCWV46JKXBR`
       );
@@ -88,6 +90,23 @@ export default function App() {
       const timeSeries = data['Time Series (Daily)'];
       const dates = Object.keys(timeSeries).slice(0, 60);
       const prices = dates.map(date => parseFloat(timeSeries[date]['4. close']));
+      
+      // Get the most recent closing price
+      const latestPrice = prices[0];
+
+      // Fetch company overview for the name
+      let companyName = newStock.symbol.toUpperCase();
+      try {
+        const overviewResponse = await fetch(
+          `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${newStock.symbol}&apikey=YIL96BCWV46JKXBR`
+        );
+        const overviewData = await overviewResponse.json();
+        if (overviewData['Name']) {
+          companyName = overviewData['Name'];
+        }
+      } catch (e) {
+        console.log('Could not fetch company name, using symbol');
+      }
 
       // Find all pullbacks from local highs
       const pullbacks = [];
@@ -128,12 +147,17 @@ export default function App() {
         recommended: typicalVol,
         average: avgVol,
         pullbacks: pullbacks.slice(0, 10),
-        dataPoints: pullbacks.length
+        dataPoints: pullbacks.length,
+        companyName: companyName,
+        latestPrice: latestPrice
       });
 
+      // Auto-fill the current price and company name
       setNewStock(prev => ({
         ...prev,
-        typicalVolatility: Math.round(typicalVol * 10) / 10
+        typicalVolatility: Math.round(typicalVol * 10) / 10,
+        currentPrice: latestPrice.toFixed(2),
+        companyName: companyName
       }));
 
     } catch (error) {
@@ -166,6 +190,7 @@ export default function App() {
     const stock = {
       id: Date.now(),
       symbol: newStock.symbol.toUpperCase(),
+      companyName: newStock.companyName || newStock.symbol.toUpperCase(),
       entryPrice: entry,
       currentPrice: current,
       highestClose: current,
@@ -185,6 +210,7 @@ export default function App() {
     
     setNewStock({
       symbol: '',
+      companyName: '',
       entryPrice: '',
       currentPrice: '',
       volatilityMultiplier: 2.0,
@@ -320,10 +346,13 @@ export default function App() {
               <input
                 type="text"
                 value={newStock.symbol}
-                onChange={(e) => setNewStock({...newStock, symbol: e.target.value.toUpperCase()})}
+                onChange={(e) => setNewStock({...newStock, symbol: e.target.value.toUpperCase(), companyName: ''})}
                 placeholder="e.g., AAPL, PMETF"
                 className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
               />
+              {newStock.companyName && (
+                <p className="text-sm text-emerald-400 mt-1">{newStock.companyName}</p>
+              )}
             </div>
             
             <div>
@@ -345,9 +374,12 @@ export default function App() {
                 step="0.01"
                 value={newStock.currentPrice}
                 onChange={(e) => setNewStock({...newStock, currentPrice: e.target.value})}
-                placeholder="Latest close price"
+                placeholder="Auto-filled after analysis"
                 className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
               />
+              {volAnalysis?.latestPrice && (
+                <p className="text-xs text-slate-400 mt-1">Latest close: ${volAnalysis.latestPrice.toFixed(2)}</p>
+              )}
             </div>
           </div>
 
@@ -368,6 +400,13 @@ export default function App() {
 
             {volAnalysis && (
               <div className="bg-slate-800/50 p-4 rounded-lg space-y-3">
+                {volAnalysis.companyName && (
+                  <div className="border-b border-slate-700 pb-3 mb-3">
+                    <p className="text-xl font-bold text-white">{volAnalysis.companyName}</p>
+                    <p className="text-sm text-slate-400">{newStock.symbol.toUpperCase()} · Latest Close: ${volAnalysis.latestPrice.toFixed(2)}</p>
+                  </div>
+                )}
+                
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-slate-400">Recommended Typical Volatility</p>
@@ -473,7 +512,10 @@ export default function App() {
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <h3 className="text-2xl font-bold text-white">{stock.symbol}</h3>
-                    <p className="text-slate-400 text-sm">Added {stock.dateAdded}</p>
+                    {stock.companyName && stock.companyName !== stock.symbol && (
+                      <p className="text-slate-400 text-sm">{stock.companyName}</p>
+                    )}
+                    <p className="text-slate-500 text-xs">Added {stock.dateAdded}</p>
                   </div>
                   <button
                     onClick={() => deleteStock(stock.id)}
