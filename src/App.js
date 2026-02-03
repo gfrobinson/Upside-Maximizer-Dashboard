@@ -145,6 +145,7 @@ export default function App() {
       entryPrice: entry,
       currentPrice: current,
       highestClose: current,
+      highestCloseDate: new Date().toISOString().split('T')[0],
       volatilityMultiplier: parseFloat(newStock.volatilityMultiplier),
       typicalVolatility: parseFloat(newStock.typicalVolatility),
       dateAdded: new Date().toISOString().split('T')[0],
@@ -178,23 +179,25 @@ export default function App() {
     const updatedStocks = stocks.map(stock => {
       if (stock.id !== id) return stock;
 
+      const isNewHigh = price > stock.highestClose;
       const newHighest = Math.max(stock.highestClose, price);
+      const newHighestDate = isNewHigh ? new Date().toISOString().split('T')[0] : stock.highestCloseDate;
       const stopLoss = calculateStopLoss(newHighest, stock.typicalVolatility, stock.volatilityMultiplier);
 
       if (price <= stopLoss && !stock.triggered) {
         const alert = {
           id: Date.now(),
           symbol: stock.symbol,
-          message: `${stock.symbol} triggered at $${price.toFixed(2)} (Stop: $${stopLoss.toFixed(2)})`,
+          message: `${stock.symbol} triggered at $${price.toFixed(2)} (UM Price: $${stopLoss.toFixed(2)})`,
           time: new Date().toISOString()
         };
         const updatedAlerts = [alert, ...alerts];
         setAlerts(updatedAlerts);
         
-        return { ...stock, currentPrice: price, highestClose: newHighest, triggered: true };
+        return { ...stock, currentPrice: price, highestClose: newHighest, highestCloseDate: newHighestDate, triggered: true };
       }
 
-      return { ...stock, currentPrice: price, highestClose: newHighest };
+      return { ...stock, currentPrice: price, highestClose: newHighest, highestCloseDate: newHighestDate };
     });
 
     setStocks(updatedStocks);
@@ -285,8 +288,8 @@ export default function App() {
           </div>
           
           <p className="text-slate-300 mb-6">
-            Track stocks that have doubled and set trailing stops based on typical volatility. 
-            The stop price ratchets up with each new high but never down. Prices update automatically each weekday after market close.
+            Track stocks that have doubled and set trailing UM execution prices based on typical volatility. 
+            The UM execution price ratchets up with each new high but never down. Prices update automatically each weekday after market close.
           </p>
 
           {/* Add New Stock Form */}
@@ -321,7 +324,7 @@ export default function App() {
             {newStock.companyName && (
               <div className="mb-4 p-3 bg-slate-800 rounded-lg border border-slate-600">
                 <p className="text-lg font-semibold text-white">{newStock.companyName}</p>
-                <p className="text-sm text-slate-400">{newStock.symbol} · Latest Close: ${newStock.currentPrice}</p>
+                <p className="text-sm text-slate-400">{newStock.symbol} · Last Close: ${newStock.currentPrice}</p>
               </div>
             )}
 
@@ -340,7 +343,7 @@ export default function App() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Current Price</label>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Last Close</label>
                 <input
                   type="number"
                   step="0.01"
@@ -400,16 +403,16 @@ export default function App() {
                   are between 8-12%, enter 10 as your typical volatility.
                 </p>
                 <p>
-                  The <strong>multiplier</strong> gives the stock breathing room. A multiplier of 2.0 means your stop will be 
+                  The <strong>multiplier</strong> gives the stock breathing room. A multiplier of 2.0 means your UM execution price will be 
                   set at 2× the typical volatility below the highest close.
                 </p>
               </div>
             )}
 
-            {/* Stop Loss Preview */}
+            {/* UM Execution Price Preview */}
             {newStock.currentPrice && newStock.typicalVolatility && (
               <div className="mb-4 p-3 bg-slate-800 rounded-lg border border-slate-600">
-                <p className="text-sm text-slate-400">Stop Loss Preview:</p>
+                <p className="text-sm text-slate-400">UM Execution Price Preview:</p>
                 <p className="text-xl font-bold text-orange-400">
                   ${calculateStopLoss(
                     parseFloat(newStock.currentPrice), 
@@ -488,26 +491,27 @@ export default function App() {
                     <p className="text-white font-semibold">${stock.entryPrice.toFixed(2)}</p>
                   </div>
                   <div>
-                    <p className="text-slate-400 text-sm">Current Price</p>
+                    <p className="text-slate-400 text-sm">Last Close</p>
                     <p className="text-white font-semibold">${stock.currentPrice.toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <p className="text-slate-400 text-sm">Highest Close</p>
-                    <p className="text-white font-semibold">${stock.highestClose.toFixed(2)}</p>
                   </div>
                   <div>
                     <p className="text-slate-400 text-sm">Total Gain</p>
                     <p className="text-emerald-400 font-semibold">+{gainPercent(stock)}%</p>
                   </div>
+                  <div>
+                    <p className="text-slate-400 text-sm">Highest Close</p>
+                    <p className="text-white font-semibold">${stock.highestClose.toFixed(2)}</p>
+                    <p className="text-slate-500 text-xs">{stock.highestCloseDate || stock.dateAdded}</p>
+                  </div>
                 </div>
 
                 <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700">
                   <div className="flex justify-between items-center mb-2">
-                    <span className="text-slate-300">Stop Loss Price:</span>
+                    <span className="text-slate-300">UM Execution Price:</span>
                     <span className="text-xl font-bold text-orange-400">${stopLoss.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between items-center mb-2">
-                    <span className="text-slate-300">Distance to Stop:</span>
+                    <span className="text-slate-300">Distance to UM Price:</span>
                     <span className={`font-semibold ${parseFloat(distanceToStop) < 5 ? 'text-red-400' : 'text-slate-300'}`}>
                       {distanceToStop}%
                     </span>
