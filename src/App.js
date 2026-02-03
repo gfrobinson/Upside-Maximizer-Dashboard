@@ -21,6 +21,7 @@ export default function App() {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [isFetching, setIsFetching] = useState(false);
   const [showVolatilityHelp, setShowVolatilityHelp] = useState(false);
+  const [stockCache, setStockCache] = useState({});
 
   // Listen for auth state changes
   useEffect(() => {
@@ -58,12 +59,25 @@ export default function App() {
       return;
     }
 
+    const symbolUpper = newStock.symbol.toUpperCase();
+    
+    // Check cache first
+    if (stockCache[symbolUpper]) {
+      const cached = stockCache[symbolUpper];
+      setNewStock(prev => ({
+        ...prev,
+        currentPrice: cached.price.toFixed(2),
+        companyName: cached.companyName
+      }));
+      return;
+    }
+
     setIsFetching(true);
 
     try {
       // Fetch daily data to get current price
       const response = await fetch(
-        `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${newStock.symbol}&outputsize=compact&apikey=YIL96BCWV46JKXBR`
+        `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbolUpper}&outputsize=compact&apikey=YIL96BCWV46JKXBR`
       );
       
       const data = await response.json();
@@ -91,10 +105,10 @@ export default function App() {
       const latestPrice = parseFloat(timeSeries[dates[0]]['4. close']);
 
       // Fetch company overview for the name
-      let companyName = newStock.symbol.toUpperCase();
+      let companyName = symbolUpper;
       try {
         const overviewResponse = await fetch(
-          `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${newStock.symbol}&apikey=YIL96BCWV46JKXBR`
+          `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${symbolUpper}&apikey=YIL96BCWV46JKXBR`
         );
         const overviewData = await overviewResponse.json();
         if (overviewData['Name']) {
@@ -103,6 +117,12 @@ export default function App() {
       } catch (e) {
         console.log('Could not fetch company name, using symbol');
       }
+
+      // Save to cache
+      setStockCache(prev => ({
+        ...prev,
+        [symbolUpper]: { price: latestPrice, companyName: companyName }
+      }));
 
       // Auto-fill the current price and company name
       setNewStock(prev => ({
