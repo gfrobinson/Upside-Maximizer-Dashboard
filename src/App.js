@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, AlertCircle, Plus, Trash2, Bell, Activity, LogOut as LogOutIcon, User } from 'lucide-react';
+import { TrendingUp, AlertCircle, Plus, Trash2, Bell, Search, LogOut as LogOutIcon, User, HelpCircle } from 'lucide-react';
 import { auth, savePortfolio, getPortfolio, subscribeToPortfolio, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import AuthModal from './AuthModal';
@@ -14,13 +14,13 @@ export default function App() {
     entryPrice: '',
     currentPrice: '',
     volatilityMultiplier: 2.0,
-    typicalVolatility: 10
+    typicalVolatility: ''
   });
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [volAnalysis, setVolAnalysis] = useState(null);
+  const [isFetching, setIsFetching] = useState(false);
+  const [showVolatilityHelp, setShowVolatilityHelp] = useState(false);
 
   // Listen for auth state changes
   useEffect(() => {
@@ -52,17 +52,16 @@ export default function App() {
     return highestClose * (1 - volatilityDecline / 100);
   };
 
-  const analyzeVolatility = async () => {
+  const fetchStockInfo = async () => {
     if (!newStock.symbol) {
       alert('Please enter a stock symbol');
       return;
     }
 
-    setIsAnalyzing(true);
-    setVolAnalysis(null);
+    setIsFetching(true);
 
     try {
-      // Fetch daily data (includes company name in metadata)
+      // Fetch daily data to get current price
       const response = await fetch(
         `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${newStock.symbol}&outputsize=compact&apikey=YIL96BCWV46JKXBR`
       );
@@ -71,28 +70,25 @@ export default function App() {
 
       if (data['Note']) {
         alert('API call limit reached. Please wait a minute and try again.');
-        setIsAnalyzing(false);
+        setIsFetching(false);
         return;
       }
 
       if (data['Error Message']) {
         alert('Invalid stock symbol. Please check and try again.');
-        setIsAnalyzing(false);
+        setIsFetching(false);
         return;
       }
 
       if (!data['Time Series (Daily)']) {
-        alert('Unable to fetch historical data. Please check the symbol and try again.');
-        setIsAnalyzing(false);
+        alert('Unable to fetch data. Please check the symbol and try again.');
+        setIsFetching(false);
         return;
       }
 
       const timeSeries = data['Time Series (Daily)'];
-      const dates = Object.keys(timeSeries).slice(0, 60);
-      const prices = dates.map(date => parseFloat(timeSeries[date]['4. close']));
-      
-      // Get the most recent closing price
-      const latestPrice = prices[0];
+      const dates = Object.keys(timeSeries);
+      const latestPrice = parseFloat(timeSeries[dates[0]]['4. close']);
 
       // Fetch company overview for the name
       let companyName = newStock.symbol.toUpperCase();
@@ -108,64 +104,19 @@ export default function App() {
         console.log('Could not fetch company name, using symbol');
       }
 
-      // Find all pullbacks from local highs
-      const pullbacks = [];
-      let currentHigh = prices[0];
-      
-      for (let i = 1; i < prices.length; i++) {
-        if (prices[i] > currentHigh) {
-          currentHigh = prices[i];
-        } else if (prices[i] < currentHigh) {
-          const decline = ((currentHigh - prices[i]) / currentHigh) * 100;
-          if (decline > 2) { // Only count pullbacks > 2%
-            pullbacks.push({
-              date: dates[i],
-              decline: decline,
-              from: currentHigh,
-              to: prices[i]
-            });
-          }
-        }
-      }
-
-      if (pullbacks.length === 0) {
-        alert('Not enough pullback data found in recent history');
-        setIsAnalyzing(false);
-        return;
-      }
-
-      // Calculate typical volatility (middle 50% of pullbacks)
-      pullbacks.sort((a, b) => a.decline - b.decline);
-      const q1 = Math.floor(pullbacks.length * 0.25);
-      const q3 = Math.floor(pullbacks.length * 0.75);
-      const middlePullbacks = pullbacks.slice(q1, q3);
-      
-      const typicalVol = middlePullbacks.reduce((sum, p) => sum + p.decline, 0) / middlePullbacks.length;
-      const avgVol = pullbacks.reduce((sum, p) => sum + p.decline, 0) / pullbacks.length;
-
-      setVolAnalysis({
-        recommended: typicalVol,
-        average: avgVol,
-        pullbacks: pullbacks.slice(0, 10),
-        dataPoints: pullbacks.length,
-        companyName: companyName,
-        latestPrice: latestPrice
-      });
-
       // Auto-fill the current price and company name
       setNewStock(prev => ({
         ...prev,
-        typicalVolatility: Math.round(typicalVol * 10) / 10,
         currentPrice: latestPrice.toFixed(2),
         companyName: companyName
       }));
 
     } catch (error) {
-      console.error('Error analyzing volatility:', error);
-      alert('Error analyzing volatility. Please try again.');
+      console.error('Error fetching stock info:', error);
+      alert('Error fetching stock info. Please try again.');
     }
 
-    setIsAnalyzing(false);
+    setIsFetching(false);
   };
 
   const addStock = async () => {
@@ -174,7 +125,7 @@ export default function App() {
       return;
     }
 
-    if (!newStock.symbol || !newStock.entryPrice || !newStock.currentPrice) {
+    if (!newStock.symbol || !newStock.entryPrice || !newStock.currentPrice || !newStock.typicalVolatility) {
       alert('Please fill in all required fields');
       return;
     }
@@ -214,9 +165,8 @@ export default function App() {
       entryPrice: '',
       currentPrice: '',
       volatilityMultiplier: 2.0,
-      typicalVolatility: 10
+      typicalVolatility: ''
     });
-    setVolAnalysis(null);
   };
 
   const updateStockPrice = async (id, newPrice) => {
@@ -336,144 +286,151 @@ export default function App() {
           
           <p className="text-slate-300 mb-6">
             Track stocks that have doubled and set trailing stops based on typical volatility. 
-            Your portfolio is automatically saved to the cloud and syncs across all devices.
+            The stop price ratchets up with each new high but never down. Prices update automatically each weekday after market close.
           </p>
 
           {/* Add New Stock Form */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Stock Symbol</label>
-              <input
-                type="text"
-                value={newStock.symbol}
-                onChange={(e) => setNewStock({...newStock, symbol: e.target.value.toUpperCase(), companyName: ''})}
-                placeholder="e.g., AAPL, PMETF"
-                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
-              />
-              {newStock.companyName && (
-                <p className="text-sm text-emerald-400 mt-1">{newStock.companyName}</p>
-              )}
-            </div>
+          <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700 mb-4">
+            <h3 className="text-lg font-semibold text-white mb-4">Add New Stock</h3>
             
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Entry Price</label>
-              <input
-                type="number"
-                step="0.01"
-                value={newStock.entryPrice}
-                onChange={(e) => setNewStock({...newStock, entryPrice: e.target.value})}
-                placeholder="Original buy price"
-                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
-              />
+            {/* Symbol and Lookup */}
+            <div className="flex gap-2 mb-4">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-slate-300 mb-2">Stock Symbol</label>
+                <input
+                  type="text"
+                  value={newStock.symbol}
+                  onChange={(e) => setNewStock({...newStock, symbol: e.target.value.toUpperCase(), companyName: ''})}
+                  placeholder="e.g., AAPL, NVDA"
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={fetchStockInfo}
+                  disabled={isFetching || !newStock.symbol}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                >
+                  <Search size={18} />
+                  {isFetching ? 'Looking up...' : 'Look Up'}
+                </button>
+              </div>
             </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Current Price</label>
-              <input
-                type="number"
-                step="0.01"
-                value={newStock.currentPrice}
-                onChange={(e) => setNewStock({...newStock, currentPrice: e.target.value})}
-                placeholder="Auto-filled after analysis"
-                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
-              />
-              {volAnalysis?.latestPrice && (
-                <p className="text-xs text-slate-400 mt-1">Latest close: ${volAnalysis.latestPrice.toFixed(2)}</p>
-              )}
-            </div>
-          </div>
 
-          {/* Volatility Analysis */}
-          <div className="mb-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700">
-            <div className="flex items-center gap-2 mb-3">
-              <Activity className="text-emerald-400" size={20} />
-              <h3 className="text-lg font-semibold text-white">Volatility Analysis</h3>
-            </div>
-            
-            <button
-              onClick={analyzeVolatility}
-              disabled={isAnalyzing || !newStock.symbol}
-              className="mb-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
-            >
-              {isAnalyzing ? 'Analyzing...' : `Analyze ${newStock.symbol || 'Stock'} Volatility`}
-            </button>
-
-            {volAnalysis && (
-              <div className="bg-slate-800/50 p-4 rounded-lg space-y-3">
-                {volAnalysis.companyName && (
-                  <div className="border-b border-slate-700 pb-3 mb-3">
-                    <p className="text-xl font-bold text-white">{volAnalysis.companyName}</p>
-                    <p className="text-sm text-slate-400">{newStock.symbol.toUpperCase()} · Latest Close: ${volAnalysis.latestPrice.toFixed(2)}</p>
-                  </div>
-                )}
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-slate-400">Recommended Typical Volatility</p>
-                    <p className="text-2xl font-bold text-emerald-400">{volAnalysis.recommended.toFixed(1)}%</p>
-                    <p className="text-xs text-slate-500">Middle 50% of pullbacks</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-slate-400">Average of All Pullbacks</p>
-                    <p className="text-2xl font-bold text-slate-300">{volAnalysis.average.toFixed(1)}%</p>
-                    <p className="text-xs text-slate-500">Based on {volAnalysis.dataPoints} pullbacks</p>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <p className="text-sm font-medium text-slate-300 mb-2">Recent Pullbacks:</p>
-                  <div className="space-y-1 max-h-40 overflow-y-auto">
-                    {volAnalysis.pullbacks.map((p, i) => (
-                      <div key={i} className="text-xs text-slate-400 flex justify-between">
-                        <span>{p.date}</span>
-                        <span className="text-red-400">-{p.decline.toFixed(1)}%</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+            {/* Company Name Display */}
+            {newStock.companyName && (
+              <div className="mb-4 p-3 bg-slate-800 rounded-lg border border-slate-600">
+                <p className="text-lg font-semibold text-white">{newStock.companyName}</p>
+                <p className="text-sm text-slate-400">{newStock.symbol} · Latest Close: ${newStock.currentPrice}</p>
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4 mt-3">
+            {/* Price Inputs */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Typical Volatility (%)
-                </label>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Your Entry Price</label>
                 <input
                   type="number"
-                  step="0.1"
-                  value={newStock.typicalVolatility}
-                  onChange={(e) => setNewStock({...newStock, typicalVolatility: e.target.value})}
+                  step="0.01"
+                  value={newStock.entryPrice}
+                  onChange={(e) => setNewStock({...newStock, entryPrice: e.target.value})}
+                  placeholder="What you paid per share"
                   className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Multiplier
-                </label>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Current Price</label>
                 <input
                   type="number"
-                  step="0.1"
-                  value={newStock.volatilityMultiplier}
-                  onChange={(e) => setNewStock({...newStock, volatilityMultiplier: e.target.value})}
+                  step="0.01"
+                  value={newStock.currentPrice}
+                  onChange={(e) => setNewStock({...newStock, currentPrice: e.target.value})}
+                  placeholder="Auto-filled from lookup"
                   className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
             </div>
 
-            <p className="text-xs text-slate-400 mt-2">
-              Stop loss will be set at: Highest Close × (1 - (Typical Vol × Multiplier) / 100)
-            </p>
-          </div>
+            {/* Volatility Settings */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="block text-sm font-medium text-slate-300">Typical Volatility (%)</label>
+                  <button
+                    onClick={() => setShowVolatilityHelp(!showVolatilityHelp)}
+                    className="text-slate-400 hover:text-slate-300"
+                  >
+                    <HelpCircle size={16} />
+                  </button>
+                </div>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={newStock.typicalVolatility}
+                  onChange={(e) => setNewStock({...newStock, typicalVolatility: e.target.value})}
+                  placeholder="e.g., 8"
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Multiplier</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={newStock.volatilityMultiplier}
+                  onChange={(e) => setNewStock({...newStock, volatilityMultiplier: e.target.value})}
+                  placeholder="e.g., 2.0"
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
 
-          <button
-            onClick={addStock}
-            className="w-full bg-emerald-600 text-white py-3 rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 font-semibold"
-          >
-            <Plus size={20} />
-            Add Stock to Tracker
-          </button>
+            {/* Volatility Help Text */}
+            {showVolatilityHelp && (
+              <div className="mb-4 p-4 bg-blue-900/30 rounded-lg border border-blue-700 text-sm text-slate-300">
+                <p className="font-semibold text-white mb-2">How to determine Typical Volatility:</p>
+                <p className="mb-2">
+                  Look at a chart of the stock during a period when it was <strong>trending up overall</strong>. 
+                  Measure several pullbacks from local highs to local lows (the temporary dips before it continued higher).
+                </p>
+                <p className="mb-2">
+                  Ignore extreme outliers and note the <strong>typical pullback size</strong>. For example, if most pullbacks 
+                  are between 8-12%, enter 10 as your typical volatility.
+                </p>
+                <p>
+                  The <strong>multiplier</strong> gives the stock breathing room. A multiplier of 2.0 means your stop will be 
+                  set at 2× the typical volatility below the highest close.
+                </p>
+              </div>
+            )}
+
+            {/* Stop Loss Preview */}
+            {newStock.currentPrice && newStock.typicalVolatility && (
+              <div className="mb-4 p-3 bg-slate-800 rounded-lg border border-slate-600">
+                <p className="text-sm text-slate-400">Stop Loss Preview:</p>
+                <p className="text-xl font-bold text-orange-400">
+                  ${calculateStopLoss(
+                    parseFloat(newStock.currentPrice), 
+                    parseFloat(newStock.typicalVolatility), 
+                    parseFloat(newStock.volatilityMultiplier)
+                  ).toFixed(2)}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {newStock.typicalVolatility}% × {newStock.volatilityMultiplier} = {(parseFloat(newStock.typicalVolatility) * parseFloat(newStock.volatilityMultiplier)).toFixed(1)}% below highest close
+                </p>
+              </div>
+            )}
+
+            <button
+              onClick={addStock}
+              className="w-full bg-emerald-600 text-white py-3 rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 font-semibold"
+            >
+              <Plus size={20} />
+              Add Stock to Tracker
+            </button>
+          </div>
         </div>
 
         {/* Alerts Section */}
@@ -557,7 +514,7 @@ export default function App() {
                   </div>
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-slate-400">
-                      Vol: {stock.typicalVolatility}% × {stock.volatilityMultiplier}
+                      Vol: {stock.typicalVolatility}% × {stock.volatilityMultiplier} = {(stock.typicalVolatility * stock.volatilityMultiplier).toFixed(1)}% below high
                     </span>
                     {stock.triggered && (
                       <span className="text-red-400 font-semibold flex items-center gap-1">
