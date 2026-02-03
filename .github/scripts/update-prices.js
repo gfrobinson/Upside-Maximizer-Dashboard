@@ -1,12 +1,22 @@
 /**
  * Upside Maximizer - Daily Price Update Script
+ * 
+ * This script runs via GitHub Actions to:
+ * 1. Fetch all users' portfolios from Firestore
+ * 2. Get current prices for each stock
+ * 3. Update currentPrice and highestClose if needed
+ * 4. Save back to Firestore
  */
 
 const admin = require('firebase-admin');
 const https = require('https');
 
-// Initialize Firebase Admin using full service account JSON
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+// Initialize Firebase Admin
+const serviceAccount = {
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+  privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+};
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -134,6 +144,8 @@ async function updateAllPrices() {
       console.log(`Updating portfolio for user: ${userId.substring(0, 8)}...`);
       
       let updated = false;
+      const today = new Date().toISOString().split('T')[0];
+      
       const updatedStocks = stocks.map(stock => {
         const symbol = stock.symbol?.toUpperCase();
         const newPrice = priceMap.get(symbol);
@@ -148,7 +160,8 @@ async function updateAllPrices() {
           // Update highest close if new price is higher
           if (newPrice > (stock.highestClose || 0)) {
             stock.highestClose = newPrice;
-            console.log(`  ${symbol}: New high! $${oldHighest?.toFixed(2) || 'N/A'} → $${newPrice.toFixed(2)}`);
+            stock.highestCloseDate = today;
+            console.log(`  ${symbol}: New high! $${oldHighest?.toFixed(2) || 'N/A'} → $${newPrice.toFixed(2)} (${today})`);
           } else {
             console.log(`  ${symbol}: $${oldPrice?.toFixed(2) || 'N/A'} → $${newPrice.toFixed(2)}`);
           }
