@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, AlertCircle, Plus, Trash2, Bell, Search, LogOut as LogOutIcon, User, HelpCircle } from 'lucide-react';
+import { TrendingUp, AlertCircle, Plus, Trash2, Bell, Search, LogOut as LogOutIcon, User, HelpCircle, Settings, Mail } from 'lucide-react';
 import { auth, savePortfolio, getPortfolio, subscribeToPortfolio, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import AuthModal from './AuthModal';
@@ -22,6 +22,11 @@ export default function App() {
   const [isFetching, setIsFetching] = useState(false);
   const [showVolatilityHelp, setShowVolatilityHelp] = useState(false);
   const [stockCache, setStockCache] = useState({});
+  const [emailPreferences, setEmailPreferences] = useState({
+    summaryFrequency: 'none', // 'none', 'daily', 'friday', 'triggerOnly'
+    emailAddress: ''
+  });
+  const [showSettings, setShowSettings] = useState(false);
 
   // Listen for auth state changes
   useEffect(() => {
@@ -43,6 +48,10 @@ export default function App() {
       setStocks(portfolioData.stocks || []);
       setAlerts(portfolioData.alerts || []);
       setLastUpdate(portfolioData.lastUpdate);
+      setEmailPreferences(portfolioData.emailPreferences || {
+        summaryFrequency: 'none',
+        emailAddress: user.email || ''
+      });
     });
 
     return unsubscribe;
@@ -251,6 +260,17 @@ export default function App() {
     }
   };
 
+  const saveEmailPreferences = async (newPrefs) => {
+    if (!user) return;
+    
+    setEmailPreferences(newPrefs);
+    await savePortfolio(user.uid, {
+      stocks,
+      alerts,
+      emailPreferences: newPrefs
+    });
+  };
+
   const gainPercent = (stock) => {
     return ((stock.currentPrice - stock.entryPrice) / stock.entryPrice * 100).toFixed(1);
   };
@@ -273,6 +293,114 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4">
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-700">
+            <div className="flex items-center gap-2 mb-4">
+              <Mail className="text-emerald-400" size={24} />
+              <h2 className="text-xl font-bold text-white">Email Notifications</h2>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Email Address</label>
+                <input
+                  type="email"
+                  value={emailPreferences.emailAddress}
+                  onChange={(e) => setEmailPreferences({...emailPreferences, emailAddress: e.target.value})}
+                  placeholder="your@email.com"
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-3">Email Frequency</label>
+                
+                <div className="space-y-3">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="summaryFrequency"
+                      value="none"
+                      checked={emailPreferences.summaryFrequency === 'none'}
+                      onChange={(e) => setEmailPreferences({...emailPreferences, summaryFrequency: e.target.value})}
+                      className="mt-1 w-4 h-4 bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    <div className="text-slate-300">
+                      <span className="font-medium">No Emails</span>
+                      <p className="text-sm text-slate-400">I'll check the website manually</p>
+                    </div>
+                  </label>
+                  
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="summaryFrequency"
+                      value="daily"
+                      checked={emailPreferences.summaryFrequency === 'daily'}
+                      onChange={(e) => setEmailPreferences({...emailPreferences, summaryFrequency: e.target.value})}
+                      className="mt-1 w-4 h-4 bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    <div className="text-slate-300">
+                      <span className="font-medium">Daily Summary</span>
+                      <p className="text-sm text-slate-400">Receive a summary every day after market close, plus trigger alerts</p>
+                    </div>
+                  </label>
+                  
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="summaryFrequency"
+                      value="friday"
+                      checked={emailPreferences.summaryFrequency === 'friday'}
+                      onChange={(e) => setEmailPreferences({...emailPreferences, summaryFrequency: e.target.value})}
+                      className="mt-1 w-4 h-4 bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    <div className="text-slate-300">
+                      <span className="font-medium">Friday Summary</span>
+                      <p className="text-sm text-slate-400">Receive a weekly summary on Fridays, plus trigger alerts</p>
+                    </div>
+                  </label>
+                  
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="summaryFrequency"
+                      value="triggerOnly"
+                      checked={emailPreferences.summaryFrequency === 'triggerOnly'}
+                      onChange={(e) => setEmailPreferences({...emailPreferences, summaryFrequency: e.target.value})}
+                      className="mt-1 w-4 h-4 bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    <div className="text-slate-300">
+                      <span className="font-medium">Trigger Alerts Only</span>
+                      <p className="text-sm text-slate-400">Only email me when a stock hits its UM Execution Price</p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowSettings(false)}
+                className="flex-1 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  saveEmailPreferences(emailPreferences);
+                  setShowSettings(false);
+                }}
+                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="max-w-6xl mx-auto">
         <div className="bg-slate-800/50 backdrop-blur rounded-lg shadow-2xl p-6 mb-6 border border-slate-700">
           <div className="flex items-center justify-between mb-6">
@@ -297,6 +425,12 @@ export default function App() {
                   {stocks.length} {stocks.length === 1 ? 'stock' : 'stocks'} tracked
                 </p>
               </div>
+              <button
+                onClick={() => setShowSettings(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
+              >
+                <Settings size={20} />
+              </button>
               <button
                 onClick={handleLogOut}
                 className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
