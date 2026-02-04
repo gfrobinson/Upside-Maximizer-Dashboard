@@ -656,10 +656,9 @@ export default function App() {
               >
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <h3 className="text-2xl font-bold text-white">{stock.symbol}</h3>
-                    {stock.companyName && stock.companyName !== stock.symbol && (
-                      <p className="text-slate-400 text-sm">{stock.companyName}</p>
-                    )}
+                    <h3 className="text-2xl font-bold text-white">
+                      {stock.symbol} - {stock.companyName && stock.companyName !== stock.symbol ? stock.companyName : ''}
+                    </h3>
                     <p className="text-slate-500 text-xs">Added {stock.dateAdded}</p>
                   </div>
                   <button
