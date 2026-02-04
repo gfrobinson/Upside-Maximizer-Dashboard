@@ -14,9 +14,148 @@ admin.initializeApp({
 
 const db = admin.firestore();
 const API_KEY = process.env.ALPHA_VANTAGE_API_KEY;
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+const EMAIL_FROM = process.env.EMAIL_FROM || 'noreply@upsidemaximizer.com';
 
 // Rate limiting: Alpha Vantage free tier = 5 requests/minute
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Calculate UM Execution Price
+function calculateUMPrice(highestClose, typicalVol, multiplier) {
+  const volatilityDecline = typicalVol * multiplier;
+  return highestClose * (1 - volatilityDecline / 100);
+}
+
+// Send email via SendGrid
+async function sendEmail(to, subject, htmlContent) {
+  if (!SENDGRID_API_KEY) {
+    console.log('  SendGrid not configured, skipping email');
+    return;
+  }
+
+  const data = JSON.stringify({
+    personalizations: [{ to: [{ email: to }] }],
+    from: { email: EMAIL_FROM, name: 'Upside Maximizer' },
+    subject: subject,
+    content: [{ type: 'text/html', value: htmlContent }]
+  });
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.sendgrid.com',
+      port: 443,
+      path: '/v3/mail/send',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${SENDGRID_API_KEY}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data)
+      }
+    }, (res) => {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        console.log(`  ✓ Email sent to ${to}`);
+        resolve();
+      } else {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+          console.error(`  ✗ Email failed: ${res.statusCode} ${body}`);
+          reject(new Error(`Email failed: ${res.statusCode}`));
+        });
+      }
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+// Generate daily summary email HTML
+function generateDailySummaryEmail(stocks) {
+  const rows = stocks.map(stock => {
+    const umPrice = calculateUMPrice(stock.highestClose, stock.typicalVolatility, stock.volatilityMultiplier);
+    const distancePercent = ((stock.currentPrice - umPrice) / stock.currentPrice * 100).toFixed(1);
+    const distanceDollars = (stock.currentPrice - umPrice).toFixed(2);
+    const isClose = parseFloat(distancePercent) < 10;
+    
+    return `
+      <tr style="background: ${isClose ? '#fef2f2' : '#ffffff'}">
+        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">${stock.symbol}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${stock.companyName || stock.symbol}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">$${stock.currentPrice.toFixed(2)}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">$${stock.highestClose.toFixed(2)}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #ea580c; font-weight: bold;">$${umPrice.toFixed(2)}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: ${isClose ? '#dc2626' : '#059669'}">
+          ${distancePercent}% ($${distanceDollars})
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
+      <h1 style="color: #10b981;">📈 Upside Maximizer Daily Summary</h1>
+      <p style="color: #6b7280;">Here's your portfolio status for ${new Date().toLocaleDateString()}:</p>
+      
+      <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+        <thead>
+          <tr style="background: #f3f4f6;">
+            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Symbol</th>
+            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Company</th>
+            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Last Close</th>
+            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Highest Close</th>
+            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">UM Price</th>
+            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Distance</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+      
+      <p style="color: #9ca3af; font-size: 12px;">
+        Positions highlighted in red are within 10% of their UM Execution Price.
+      </p>
+    </div>
+  `;
+}
+
+// Generate trigger alert email HTML
+function generateTriggerAlertEmail(stock, umPrice) {
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h1 style="color: #dc2626;">🚨 UM Execution Price Triggered!</h1>
+      
+      <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h2 style="margin: 0 0 10px 0; color: #1f2937;">${stock.symbol}</h2>
+        <p style="margin: 0; color: #6b7280;">${stock.companyName || ''}</p>
+        
+        <table style="margin-top: 15px;">
+          <tr>
+            <td style="padding: 5px 20px 5px 0; color: #6b7280;">Last Close:</td>
+            <td style="font-weight: bold;">$${stock.currentPrice.toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 5px 20px 5px 0; color: #6b7280;">UM Execution Price:</td>
+            <td style="font-weight: bold; color: #ea580c;">$${umPrice.toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 5px 20px 5px 0; color: #6b7280;">Highest Close:</td>
+            <td>$${stock.highestClose.toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 5px 20px 5px 0; color: #6b7280;">Entry Price:</td>
+            <td>$${stock.entryPrice.toFixed(2)}</td>
+          </tr>
+        </table>
+      </div>
+      
+      <p style="color: #6b7280;">
+        Consider reviewing this position. The stock has closed at or below your UM Execution Price.
+      </p>
+    </div>
+  `;
+}
 
 // Fetch current price from Alpha Vantage
 async function fetchPrice(symbol) {
@@ -89,7 +228,12 @@ async function updateAllPrices() {
     snapshot.forEach(doc => {
       const data = doc.data();
       const stocks = data.stocks || [];
-      userPortfolios.push({ userId: doc.id, stocks, data });
+      userPortfolios.push({ 
+        userId: doc.id, 
+        stocks, 
+        data,
+        emailPreferences: data.emailPreferences || {}
+      });
       stocks.forEach(stock => {
         if (stock.symbol) {
           allSymbols.add(stock.symbol.toUpperCase());
@@ -130,11 +274,12 @@ async function updateAllPrices() {
     console.log(`\nFetched prices for ${priceMap.size} symbols.\n`);
     
     // Update each user's portfolio
-    for (const { userId, stocks, data } of userPortfolios) {
+    for (const { userId, stocks, data, emailPreferences } of userPortfolios) {
       console.log(`Updating portfolio for user: ${userId.substring(0, 8)}...`);
       
       let updated = false;
       const today = new Date().toISOString().split('T')[0];
+      const triggeredStocks = [];
       
       const updatedStocks = stocks.map(stock => {
         const symbol = stock.symbol?.toUpperCase();
@@ -156,6 +301,14 @@ async function updateAllPrices() {
             console.log(`  ${symbol}: $${oldPrice?.toFixed(2) || 'N/A'} → $${newPrice.toFixed(2)}`);
           }
           
+          // Check if UM price triggered
+          const umPrice = calculateUMPrice(stock.highestClose, stock.typicalVolatility, stock.volatilityMultiplier);
+          if (newPrice <= umPrice && !stock.triggered) {
+            stock.triggered = true;
+            triggeredStocks.push({ stock: { ...stock }, umPrice });
+            console.log(`  🚨 ${symbol} TRIGGERED at $${newPrice.toFixed(2)} (UM: $${umPrice.toFixed(2)})`);
+          }
+          
           updated = true;
         }
         
@@ -168,10 +321,53 @@ async function updateAllPrices() {
           stocks: updatedStocks,
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
         });
-        console.log(`  ✓ Saved to Firestore\n`);
+        console.log(`  ✓ Saved to Firestore`);
       } else {
-        console.log(`  No updates needed\n`);
+        console.log(`  No updates needed`);
       }
+      
+      // Send emails if preferences are set
+      const userEmail = emailPreferences.emailAddress;
+      const frequency = emailPreferences.summaryFrequency || 'none';
+      const dayOfWeek = new Date().getDay(); // 0 = Sunday, 5 = Friday
+      const isFriday = dayOfWeek === 5;
+      
+      if (userEmail && SENDGRID_API_KEY && frequency !== 'none') {
+        // Send trigger alerts for all options except 'none'
+        if (triggeredStocks.length > 0) {
+          for (const { stock, umPrice } of triggeredStocks) {
+            try {
+              await sendEmail(
+                userEmail,
+                `🚨 ${stock.symbol} Hit UM Execution Price`,
+                generateTriggerAlertEmail(stock, umPrice)
+              );
+            } catch (e) {
+              console.error(`  Failed to send trigger email: ${e.message}`);
+            }
+          }
+        }
+        
+        // Send summary based on frequency preference
+        const shouldSendSummary = 
+          (frequency === 'daily') || 
+          (frequency === 'friday' && isFriday);
+        
+        if (shouldSendSummary && updatedStocks.length > 0) {
+          try {
+            const summaryType = frequency === 'friday' ? 'Weekly' : 'Daily';
+            await sendEmail(
+              userEmail,
+              `📈 Upside Maximizer ${summaryType} Summary - ${today}`,
+              generateDailySummaryEmail(updatedStocks)
+            );
+          } catch (e) {
+            console.error(`  Failed to send summary email: ${e.message}`);
+          }
+        }
+      }
+      
+      console.log('');
     }
     
     console.log('='.repeat(50));
