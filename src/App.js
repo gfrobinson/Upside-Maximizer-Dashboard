@@ -13,6 +13,8 @@ export default function App() {
     companyName: '',
     entryPrice: '',
     currentPrice: '',
+    highestClose: '',
+    highestCloseDate: '',
     volatilityMultiplier: 2.0,
     typicalVolatility: ''
   });
@@ -76,7 +78,9 @@ export default function App() {
       setNewStock(prev => ({
         ...prev,
         currentPrice: cached.price.toFixed(2),
-        companyName: cached.companyName
+        companyName: cached.companyName,
+        highestClose: cached.highestClose.toFixed(2),
+        highestCloseDate: cached.highestCloseDate
       }));
       return;
     }
@@ -84,7 +88,7 @@ export default function App() {
     setIsFetching(true);
 
     try {
-      // Fetch daily data to get current price
+      // Fetch daily data to get current price and historical highs
       const response = await fetch(
         `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbolUpper}&outputsize=compact&apikey=YIL96BCWV46JKXBR`
       );
@@ -112,6 +116,18 @@ export default function App() {
       const timeSeries = data['Time Series (Daily)'];
       const dates = Object.keys(timeSeries);
       const latestPrice = parseFloat(timeSeries[dates[0]]['4. close']);
+      
+      // Find highest close in the last 100 days
+      let highestClose = 0;
+      let highestCloseDate = dates[0];
+      
+      for (const date of dates) {
+        const closePrice = parseFloat(timeSeries[date]['4. close']);
+        if (closePrice > highestClose) {
+          highestClose = closePrice;
+          highestCloseDate = date;
+        }
+      }
 
       // Fetch company overview for the name
       let companyName = symbolUpper;
@@ -130,14 +146,21 @@ export default function App() {
       // Save to cache
       setStockCache(prev => ({
         ...prev,
-        [symbolUpper]: { price: latestPrice, companyName: companyName }
+        [symbolUpper]: { 
+          price: latestPrice, 
+          companyName: companyName,
+          highestClose: highestClose,
+          highestCloseDate: highestCloseDate
+        }
       }));
 
-      // Auto-fill the current price and company name
+      // Auto-fill the current price, company name, and highest close
       setNewStock(prev => ({
         ...prev,
         currentPrice: latestPrice.toFixed(2),
-        companyName: companyName
+        companyName: companyName,
+        highestClose: highestClose.toFixed(2),
+        highestCloseDate: highestCloseDate
       }));
 
     } catch (error) {
@@ -161,6 +184,7 @@ export default function App() {
 
     const entry = parseFloat(newStock.entryPrice);
     const current = parseFloat(newStock.currentPrice);
+    const highest = parseFloat(newStock.highestClose) || current;
     
     if (current < entry * 2) {
       alert('Stock must be up at least 100% (doubled) to set an Upside Maximizer');
@@ -173,8 +197,8 @@ export default function App() {
       companyName: newStock.companyName || newStock.symbol.toUpperCase(),
       entryPrice: entry,
       currentPrice: current,
-      highestClose: current,
-      highestCloseDate: new Date().toISOString().split('T')[0],
+      highestClose: highest,
+      highestCloseDate: newStock.highestCloseDate || new Date().toISOString().split('T')[0],
       volatilityMultiplier: parseFloat(newStock.volatilityMultiplier),
       typicalVolatility: parseFloat(newStock.typicalVolatility),
       dateAdded: new Date().toISOString().split('T')[0],
@@ -194,6 +218,8 @@ export default function App() {
       companyName: '',
       entryPrice: '',
       currentPrice: '',
+      highestClose: '',
+      highestCloseDate: '',
       volatilityMultiplier: 2.0,
       typicalVolatility: ''
     });
@@ -479,6 +505,11 @@ export default function App() {
               <div className="mb-4 p-3 bg-slate-800 rounded-lg border border-slate-600">
                 <p className="text-lg font-semibold text-white">{newStock.companyName}</p>
                 <p className="text-sm text-slate-400">{newStock.symbol} · Last Close: ${newStock.currentPrice}</p>
+                {newStock.highestClose && (
+                  <p className="text-sm text-emerald-400">
+                    Highest Close: ${newStock.highestClose} ({newStock.highestCloseDate})
+                  </p>
+                )}
               </div>
             )}
 
@@ -564,18 +595,18 @@ export default function App() {
             )}
 
             {/* UM Execution Price Preview */}
-            {newStock.currentPrice && newStock.typicalVolatility && (
+            {newStock.highestClose && newStock.typicalVolatility && (
               <div className="mb-4 p-3 bg-slate-800 rounded-lg border border-slate-600">
-                <p className="text-sm text-slate-400">UM Execution Price Preview:</p>
+                <p className="text-sm text-slate-400">UM Execution Price Preview (based on highest close):</p>
                 <p className="text-xl font-bold text-orange-400">
                   ${calculateStopLoss(
-                    parseFloat(newStock.currentPrice), 
+                    parseFloat(newStock.highestClose), 
                     parseFloat(newStock.typicalVolatility), 
                     parseFloat(newStock.volatilityMultiplier)
                   ).toFixed(2)}
                 </p>
                 <p className="text-xs text-slate-500">
-                  {newStock.typicalVolatility}% × {newStock.volatilityMultiplier} = {(parseFloat(newStock.typicalVolatility) * parseFloat(newStock.volatilityMultiplier)).toFixed(1)}% below highest close
+                  {newStock.typicalVolatility}% × {newStock.volatilityMultiplier} = {(parseFloat(newStock.typicalVolatility) * parseFloat(newStock.volatilityMultiplier)).toFixed(1)}% below highest close (${newStock.highestClose})
                 </p>
               </div>
             )}
