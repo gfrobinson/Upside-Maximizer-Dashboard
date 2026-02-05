@@ -16,7 +16,8 @@ export default function App() {
     highestClose: '',
     highestCloseDate: '',
     volatilityMultiplier: 2.0,
-    typicalVolatility: ''
+    typicalVolatility: '',
+    note: ''
   });
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -223,7 +224,8 @@ export default function App() {
       volatilityMultiplier: parseFloat(newStock.volatilityMultiplier),
       typicalVolatility: parseFloat(newStock.typicalVolatility),
       dateAdded: new Date().toISOString().split('T')[0],
-      triggered: false
+      triggered: false,
+      note: newStock.note || ''
     };
 
     const updatedStocks = [...stocks, stock];
@@ -242,7 +244,8 @@ export default function App() {
       highestClose: '',
       highestCloseDate: '',
       volatilityMultiplier: 2.0,
-      typicalVolatility: ''
+      typicalVolatility: '',
+      note: ''
     });
   };
 
@@ -615,6 +618,18 @@ export default function App() {
               </div>
             )}
 
+            {/* Note Field */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-300 mb-2">Note (optional)</label>
+              <textarea
+                value={newStock.note}
+                onChange={(e) => setNewStock({...newStock, note: e.target.value})}
+                placeholder="Add a personal note about this position..."
+                rows={2}
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500 resize-none"
+              />
+            </div>
+
             {/* UM Execution Price Preview */}
             {newStock.highestClose && newStock.typicalVolatility && (
               <div className="mb-4 p-3 bg-slate-800 rounded-lg border border-slate-600">
@@ -681,6 +696,9 @@ export default function App() {
                       {stock.symbol}{stock.companyName && stock.companyName !== stock.symbol ? ` - ${stock.companyName}` : ''}
                     </h3>
                     <p className="text-slate-500 text-xs">Added {stock.dateAdded}</p>
+                    {stock.note && (
+                      <p className="text-slate-400 text-sm mt-1 italic">"{stock.note}"</p>
+                    )}
                   </div>
                   <button
                     onClick={() => deleteStock(stock.id)}
