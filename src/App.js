@@ -75,6 +75,7 @@ export default function App() {
 
     const symbolUpper = newStock.symbol.toUpperCase();
     const FINNHUB_KEY = 'd62dqcpr01qlugepll2gd62dqcpr01qlugepll30';
+    const ALPHA_VANTAGE_KEY = 'YIL96BCWV46JKXBR';
     
     // Check cache first
     if (stockCache[symbolUpper]) {
@@ -105,44 +106,108 @@ export default function App() {
           companyName = profileData.name;
         }
       } catch (e) {
-        console.log('Could not fetch company name from Finnhub, using symbol');
+        console.log('Could not fetch company name from Finnhub');
       }
 
-      // Get historical candles from Finnhub (last 100 days)
+      // Try Finnhub for price data first
+      let latestPrice = null;
+      let highestClose = 0;
+      let highestCloseDate = new Date().toISOString().split('T')[0];
+      let dataSource = null;
+      
+      // Try Finnhub candles
       const now = Math.floor(Date.now() / 1000);
       const hundredDaysAgo = now - (100 * 24 * 60 * 60);
       
-      const candleResponse = await fetch(
-        `https://finnhub.io/api/v1/stock/candle?symbol=${symbolUpper}&resolution=D&from=${hundredDaysAgo}&to=${now}&token=${FINNHUB_KEY}`
-      );
-      
-      const candleData = await candleResponse.json();
+      try {
+        const candleResponse = await fetch(
+          `https://finnhub.io/api/v1/stock/candle?symbol=${symbolUpper}&resolution=D&from=${hundredDaysAgo}&to=${now}&token=${FINNHUB_KEY}`
+        );
+        const candleData = await candleResponse.json();
 
-      if (candleData.s === 'no_data' || !candleData.c || candleData.c.length === 0) {
+        if (candleData.s === 'ok' && candleData.c && candleData.c.length > 0) {
+          const closePrices = candleData.c;
+          const timestamps = candleData.t;
+          
+          latestPrice = closePrices[closePrices.length - 1];
+          
+          for (let i = 0; i < closePrices.length; i++) {
+            if (closePrices[i] > highestClose) {
+              highestClose = closePrices[i];
+              highestCloseDate = new Date(timestamps[i] * 1000).toISOString().split('T')[0];
+            }
+          }
+          dataSource = 'finnhub';
+        }
+      } catch (e) {
+        console.log('Finnhub candle request failed');
+      }
+
+      // If Finnhub didn't work, fall back to Alpha Vantage
+      if (!latestPrice) {
+        console.log('Falling back to Alpha Vantage...');
+        
+        const response = await fetch(
+          `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbolUpper}&outputsize=compact&apikey=${ALPHA_VANTAGE_KEY}`
+        );
+        const data = await response.json();
+
+        if (data['Note']) {
+          alert('API call limit reached. Please wait a minute and try again.');
+          setIsFetching(false);
+          return;
+        }
+
+        if (data['Error Message'] || !data['Time Series (Daily)']) {
+          alert('Unable to fetch data. Please check the symbol and try again.');
+          setIsFetching(false);
+          return;
+        }
+
+        const timeSeries = data['Time Series (Daily)'];
+        const dates = Object.keys(timeSeries);
+        latestPrice = parseFloat(timeSeries[dates[0]]['4. close']);
+        
+        for (const date of dates) {
+          const closePrice = parseFloat(timeSeries[date]['4. close']);
+          if (closePrice > highestClose) {
+            highestClose = closePrice;
+            highestCloseDate = date;
+          }
+        }
+        dataSource = 'alphavantage';
+        
+        // Try to get company name from Alpha Vantage if Finnhub didn't have it
+        if (companyName === symbolUpper) {
+          try {
+            const searchResponse = await fetch(
+              `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${symbolUpper}&apikey=${ALPHA_VANTAGE_KEY}`
+            );
+            const searchData = await searchResponse.json();
+            
+            if (searchData['bestMatches'] && searchData['bestMatches'].length > 0) {
+              const exactMatch = searchData['bestMatches'].find(
+                match => match['1. symbol'].toUpperCase() === symbolUpper
+              );
+              if (exactMatch) {
+                companyName = exactMatch['2. name'];
+              } else if (searchData['bestMatches'][0]) {
+                companyName = searchData['bestMatches'][0]['2. name'];
+              }
+            }
+          } catch (e) {
+            console.log('Could not fetch company name from Alpha Vantage');
+          }
+        }
+      }
+
+      if (!latestPrice) {
         alert('Unable to fetch data. Please check the symbol and try again.');
         setIsFetching(false);
         return;
       }
 
-      const closePrices = candleData.c; // Array of closing prices
-      const timestamps = candleData.t; // Array of timestamps
-      
-      // Latest price is the last one in the array
-      const latestPrice = closePrices[closePrices.length - 1];
-      
-      // Find highest close and its date
-      let highestClose = 0;
-      let highestCloseIndex = 0;
-      
-      for (let i = 0; i < closePrices.length; i++) {
-        if (closePrices[i] > highestClose) {
-          highestClose = closePrices[i];
-          highestCloseIndex = i;
-        }
-      }
-      
-      // Convert timestamp to date string
-      const highestCloseDate = new Date(timestamps[highestCloseIndex] * 1000).toISOString().split('T')[0];
+      console.log(`Data fetched from ${dataSource}`);
 
       // Save to cache
       setStockCache(prev => ({
@@ -624,7 +689,7 @@ export default function App() {
               <textarea
                 value={newStock.note}
                 onChange={(e) => setNewStock({...newStock, note: e.target.value})}
-                placeholder="Upside Maximizer execution plan i.e., recover cost basis, sell half, etc."
+                placeholder="Upside Maximizer execution plan i.e. recover cost basis, sell half, etc."
                 rows={2}
                 className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500 resize-none"
               />
