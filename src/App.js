@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, AlertCircle, Plus, Trash2, Bell, Search, LogOut as LogOutIcon, User, HelpCircle, Settings, Mail } from 'lucide-react';
+import { TrendingUp, AlertCircle, Plus, Trash2, Bell, Search, LogOut as LogOutIcon, User, HelpCircle, Settings, Mail, Edit3 } from 'lucide-react';
 import { auth, savePortfolio, getPortfolio, subscribeToPortfolio, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import AuthModal from './AuthModal';
@@ -30,6 +30,8 @@ export default function App() {
     emailAddress: ''
   });
   const [showSettings, setShowSettings] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editingNoteText, setEditingNoteText] = useState('');
 
   // Listen for auth state changes
   useEffect(() => {
@@ -72,6 +74,7 @@ export default function App() {
     }
 
     const symbolUpper = newStock.symbol.toUpperCase();
+    const FINNHUB_KEY = 'd62dqcpr01qlugepll2gd62dqcpr01qlugepll30';
     
     // Check cache first
     if (stockCache[symbolUpper]) {
@@ -89,70 +92,57 @@ export default function App() {
     setIsFetching(true);
 
     try {
-      // First, get company name from SYMBOL_SEARCH (works for most stocks)
+      // Get company name from Finnhub
       let companyName = symbolUpper;
       
       try {
-        const searchResponse = await fetch(
-          `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${symbolUpper}&apikey=YIL96BCWV46JKXBR`
+        const profileResponse = await fetch(
+          `https://finnhub.io/api/v1/stock/profile2?symbol=${symbolUpper}&token=${FINNHUB_KEY}`
         );
-        const searchData = await searchResponse.json();
+        const profileData = await profileResponse.json();
         
-        if (searchData['bestMatches'] && searchData['bestMatches'].length > 0) {
-          // Find exact match
-          const exactMatch = searchData['bestMatches'].find(
-            match => match['1. symbol'].toUpperCase() === symbolUpper
-          );
-          if (exactMatch) {
-            companyName = exactMatch['2. name'];
-          } else if (searchData['bestMatches'][0]) {
-            companyName = searchData['bestMatches'][0]['2. name'];
-          }
+        if (profileData && profileData.name) {
+          companyName = profileData.name;
         }
       } catch (e) {
-        console.log('Could not fetch company name from search, using symbol');
+        console.log('Could not fetch company name from Finnhub, using symbol');
       }
 
-      // Then fetch daily data to get current price and historical highs
-      const response = await fetch(
-        `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbolUpper}&outputsize=compact&apikey=YIL96BCWV46JKXBR`
+      // Get historical candles from Finnhub (last 100 days)
+      const now = Math.floor(Date.now() / 1000);
+      const hundredDaysAgo = now - (100 * 24 * 60 * 60);
+      
+      const candleResponse = await fetch(
+        `https://finnhub.io/api/v1/stock/candle?symbol=${symbolUpper}&resolution=D&from=${hundredDaysAgo}&to=${now}&token=${FINNHUB_KEY}`
       );
       
-      const data = await response.json();
+      const candleData = await candleResponse.json();
 
-      if (data['Note']) {
-        alert('API call limit reached. Please wait a minute and try again.');
-        setIsFetching(false);
-        return;
-      }
-
-      if (data['Error Message']) {
-        alert('Invalid stock symbol. Please check and try again.');
-        setIsFetching(false);
-        return;
-      }
-
-      if (!data['Time Series (Daily)']) {
+      if (candleData.s === 'no_data' || !candleData.c || candleData.c.length === 0) {
         alert('Unable to fetch data. Please check the symbol and try again.');
         setIsFetching(false);
         return;
       }
 
-      const timeSeries = data['Time Series (Daily)'];
-      const dates = Object.keys(timeSeries);
-      const latestPrice = parseFloat(timeSeries[dates[0]]['4. close']);
+      const closePrices = candleData.c; // Array of closing prices
+      const timestamps = candleData.t; // Array of timestamps
       
-      // Find highest close in the last 100 days
+      // Latest price is the last one in the array
+      const latestPrice = closePrices[closePrices.length - 1];
+      
+      // Find highest close and its date
       let highestClose = 0;
-      let highestCloseDate = dates[0];
+      let highestCloseIndex = 0;
       
-      for (const date of dates) {
-        const closePrice = parseFloat(timeSeries[date]['4. close']);
-        if (closePrice > highestClose) {
-          highestClose = closePrice;
-          highestCloseDate = date;
+      for (let i = 0; i < closePrices.length; i++) {
+        if (closePrices[i] > highestClose) {
+          highestClose = closePrices[i];
+          highestCloseIndex = i;
         }
       }
+      
+      // Convert timestamp to date string
+      const highestCloseDate = new Date(timestamps[highestCloseIndex] * 1000).toISOString().split('T')[0];
 
       // Save to cache
       setStockCache(prev => ({
@@ -307,6 +297,27 @@ export default function App() {
       stocks,
       alerts,
       emailPreferences: newPrefs
+    });
+  };
+
+  const saveNote = async (stockId, newNote) => {
+    if (!user) return;
+    
+    const updatedStocks = stocks.map(stock => {
+      if (stock.id === stockId) {
+        return { ...stock, note: newNote };
+      }
+      return stock;
+    });
+    
+    setStocks(updatedStocks);
+    setEditingNoteId(null);
+    setEditingNoteText('');
+    
+    await savePortfolio(user.uid, {
+      stocks: updatedStocks,
+      alerts,
+      emailPreferences
     });
   };
 
@@ -613,7 +624,7 @@ export default function App() {
               <textarea
                 value={newStock.note}
                 onChange={(e) => setNewStock({...newStock, note: e.target.value})}
-                placeholder="Add a personal note about this position..."
+                placeholder="Upside Maximizer execution plan i.e., recover cost basis, sell half, etc."
                 rows={2}
                 className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500 resize-none"
               />
@@ -680,18 +691,57 @@ export default function App() {
                 }`}
               >
                 <div className="flex justify-between items-start mb-4">
-                  <div>
+                  <div className="flex-1">
                     <h3 className="text-2xl font-bold text-white">
                       {stock.symbol}{stock.companyName && stock.companyName !== stock.symbol ? ` - ${stock.companyName}` : ''}
                     </h3>
                     <p className="text-slate-500 text-xs">Added {stock.dateAdded}</p>
-                    {stock.note && (
-                      <p className="text-slate-400 text-sm mt-1 italic">"{stock.note}"</p>
+                    
+                    {/* Editable Note */}
+                    {editingNoteId === stock.id ? (
+                      <div className="mt-2">
+                        <textarea
+                          value={editingNoteText}
+                          onChange={(e) => setEditingNoteText(e.target.value)}
+                          placeholder="Upside Maximizer execution plan i.e. recover cost basis, sell half, etc."
+                          rows={2}
+                          className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:ring-2 focus:ring-emerald-500 resize-none"
+                          autoFocus
+                        />
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={() => saveNote(stock.id, editingNoteText)}
+                            className="px-3 py-1 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => { setEditingNoteId(null); setEditingNoteText(''); }}
+                            className="px-3 py-1 bg-slate-600 text-white text-sm rounded hover:bg-slate-500"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-2 mt-1">
+                        {stock.note ? (
+                          <p className="text-slate-400 text-sm italic">"{stock.note}"</p>
+                        ) : (
+                          <p className="text-slate-600 text-sm italic">No note</p>
+                        )}
+                        <button
+                          onClick={() => { setEditingNoteId(stock.id); setEditingNoteText(stock.note || ''); }}
+                          className="text-slate-500 hover:text-slate-300 transition-colors"
+                        >
+                          <Edit3 size={14} />
+                        </button>
+                      </div>
                     )}
                   </div>
                   <button
                     onClick={() => deleteStock(stock.id)}
-                    className="text-red-400 hover:text-red-300 transition-colors"
+                    className="text-red-400 hover:text-red-300 transition-colors ml-4"
                   >
                     <Trash2 size={20} />
                   </button>
