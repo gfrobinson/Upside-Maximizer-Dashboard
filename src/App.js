@@ -89,7 +89,31 @@ export default function App() {
     setIsFetching(true);
 
     try {
-      // Fetch daily data to get current price and historical highs
+      // First, get company name from SYMBOL_SEARCH (works for most stocks)
+      let companyName = symbolUpper;
+      
+      try {
+        const searchResponse = await fetch(
+          `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${symbolUpper}&apikey=YIL96BCWV46JKXBR`
+        );
+        const searchData = await searchResponse.json();
+        
+        if (searchData['bestMatches'] && searchData['bestMatches'].length > 0) {
+          // Find exact match
+          const exactMatch = searchData['bestMatches'].find(
+            match => match['1. symbol'].toUpperCase() === symbolUpper
+          );
+          if (exactMatch) {
+            companyName = exactMatch['2. name'];
+          } else if (searchData['bestMatches'][0]) {
+            companyName = searchData['bestMatches'][0]['2. name'];
+          }
+        }
+      } catch (e) {
+        console.log('Could not fetch company name from search, using symbol');
+      }
+
+      // Then fetch daily data to get current price and historical highs
       const response = await fetch(
         `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbolUpper}&outputsize=compact&apikey=YIL96BCWV46JKXBR`
       );
@@ -128,41 +152,6 @@ export default function App() {
           highestClose = closePrice;
           highestCloseDate = date;
         }
-      }
-
-      // Fetch company name - try OVERVIEW first, then SYMBOL_SEARCH as fallback
-      let companyName = symbolUpper;
-      
-      try {
-        // First try OVERVIEW (works for larger stocks)
-        const overviewResponse = await fetch(
-          `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${symbolUpper}&apikey=YIL96BCWV46JKXBR`
-        );
-        const overviewData = await overviewResponse.json();
-        
-        if (overviewData['Name']) {
-          companyName = overviewData['Name'];
-        } else {
-          // Fallback to SYMBOL_SEARCH (works for more stocks including OTC)
-          const searchResponse = await fetch(
-            `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${symbolUpper}&apikey=YIL96BCWV46JKXBR`
-          );
-          const searchData = await searchResponse.json();
-          
-          if (searchData['bestMatches'] && searchData['bestMatches'].length > 0) {
-            // Find exact match
-            const exactMatch = searchData['bestMatches'].find(
-              match => match['1. symbol'].toUpperCase() === symbolUpper
-            );
-            if (exactMatch) {
-              companyName = exactMatch['2. name'];
-            } else {
-              companyName = searchData['bestMatches'][0]['2. name'];
-            }
-          }
-        }
-      } catch (e) {
-        console.log('Could not fetch company name, using symbol');
       }
 
       // Save to cache
