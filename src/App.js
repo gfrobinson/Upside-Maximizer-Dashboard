@@ -716,7 +716,7 @@ export default function App() {
               <textarea
                 value={newStock.note}
                 onChange={(e) => setNewStock({...newStock, note: e.target.value})}
-                placeholder="Upside Maximizer execution plan i.e., recover cost basis, sell half, etc."
+                placeholder="Upside Maximizer execution plan i.e. recover cost basis, sell half, etc."
                 rows={2}
                 className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500 resize-none"
               />
@@ -845,17 +845,17 @@ export default function App() {
                     <p className="text-white font-semibold">${stock.entryPrice.toFixed(2)}</p>
                   </div>
                   <div>
+                    <p className="text-slate-400 text-sm">Highest Close</p>
+                    <p className="text-white font-semibold">${stock.highestClose.toFixed(2)}</p>
+                    <p className="text-slate-500 text-xs">{stock.highestCloseDate || stock.dateAdded}</p>
+                  </div>
+                  <div>
                     <p className="text-slate-400 text-sm">Last Close</p>
                     <p className="text-white font-semibold">${stock.currentPrice.toFixed(2)}</p>
                   </div>
                   <div>
                     <p className="text-slate-400 text-sm">Total Gain</p>
                     <p className="text-emerald-400 font-semibold">+{gainPercent(stock)}%</p>
-                  </div>
-                  <div>
-                    <p className="text-slate-400 text-sm">Highest Close</p>
-                    <p className="text-white font-semibold">${stock.highestClose.toFixed(2)}</p>
-                    <p className="text-slate-500 text-xs">{stock.highestCloseDate || stock.dateAdded}</p>
                   </div>
                 </div>
 
