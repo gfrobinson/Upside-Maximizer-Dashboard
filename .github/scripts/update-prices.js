@@ -15,6 +15,7 @@ admin.initializeApp({
 
 const db = admin.firestore();
 const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
+const ALPHA_VANTAGE_KEY = process.env.ALPHA_VANTAGE_API_KEY;
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || 'noreply@upsidemaximizer.com';
 
@@ -158,9 +159,9 @@ function generateTriggerAlertEmail(stock, umPrice) {
   `;
 }
 
-// Fetch current price from Finnhub
-async function fetchPrice(symbol) {
-  return new Promise((resolve, reject) => {
+// Fetch price from Finnhub
+async function fetchPriceFinnhub(symbol) {
+  return new Promise((resolve) => {
     const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${FINNHUB_KEY}`;
     
     https.get(url, (res) => {
@@ -169,21 +170,65 @@ async function fetchPrice(symbol) {
       res.on('end', () => {
         try {
           const json = JSON.parse(data);
-          
           if (json.c && json.c > 0) {
-            const price = json.c; // Current price
-            console.log(`  ${symbol}: $${price.toFixed(2)}`);
-            resolve(price);
+            resolve(json.c);
           } else {
-            console.log(`  ${symbol}: No data found`);
             resolve(null);
           }
         } catch (error) {
-          reject(error);
+          resolve(null);
         }
       });
-    }).on('error', reject);
+    }).on('error', () => resolve(null));
   });
+}
+
+// Fetch price from Alpha Vantage
+async function fetchPriceAlphaVantage(symbol) {
+  return new Promise((resolve) => {
+    const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${ALPHA_VANTAGE_KEY}`;
+    
+    https.get(url, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json['Global Quote'] && json['Global Quote']['05. price']) {
+            resolve(parseFloat(json['Global Quote']['05. price']));
+          } else {
+            resolve(null);
+          }
+        } catch (error) {
+          resolve(null);
+        }
+      });
+    }).on('error', () => resolve(null));
+  });
+}
+
+// Fetch price - try Finnhub first, then Alpha Vantage
+async function fetchPrice(symbol) {
+  // Try Finnhub first
+  let price = await fetchPriceFinnhub(symbol);
+  
+  if (price) {
+    console.log(`  ${symbol}: $${price.toFixed(2)} (Finnhub)`);
+    return price;
+  }
+  
+  // Fall back to Alpha Vantage
+  if (ALPHA_VANTAGE_KEY) {
+    price = await fetchPriceAlphaVantage(symbol);
+    
+    if (price) {
+      console.log(`  ${symbol}: $${price.toFixed(2)} (Alpha Vantage)`);
+      return price;
+    }
+  }
+  
+  console.log(`  ${symbol}: No data found`);
+  return null;
 }
 
 // Main update function
