@@ -1,5 +1,6 @@
 /**
  * Upside Maximizer - Daily Price Update Script
+ * Uses Finnhub API for price data
  */
 
 const admin = require('firebase-admin');
@@ -13,11 +14,11 @@ admin.initializeApp({
 });
 
 const db = admin.firestore();
-const API_KEY = process.env.ALPHA_VANTAGE_API_KEY;
+const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || 'noreply@upsidemaximizer.com';
 
-// Rate limiting: Alpha Vantage free tier = 5 requests/minute
+// Rate limiting helper
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Calculate UM Execution Price
@@ -157,10 +158,10 @@ function generateTriggerAlertEmail(stock, umPrice) {
   `;
 }
 
-// Fetch current price from Alpha Vantage
+// Fetch current price from Finnhub
 async function fetchPrice(symbol) {
   return new Promise((resolve, reject) => {
-    const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${API_KEY}`;
+    const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${FINNHUB_KEY}`;
     
     https.get(url, (res) => {
       let data = '';
@@ -169,15 +170,8 @@ async function fetchPrice(symbol) {
         try {
           const json = JSON.parse(data);
           
-          // Check for API limit message
-          if (json.Note || json.Information) {
-            console.log(`API limit reached: ${json.Note || json.Information}`);
-            reject(new Error('API_LIMIT'));
-            return;
-          }
-          
-          if (json['Global Quote'] && json['Global Quote']['05. price']) {
-            const price = parseFloat(json['Global Quote']['05. price']);
+          if (json.c && json.c > 0) {
+            const price = json.c; // Current price
             console.log(`  ${symbol}: $${price.toFixed(2)}`);
             resolve(price);
           } else {
@@ -199,8 +193,8 @@ async function updateAllPrices() {
   console.log(`Time: ${new Date().toISOString()}`);
   console.log('='.repeat(50));
   
-  if (!API_KEY) {
-    console.error('ERROR: ALPHA_VANTAGE_API_KEY not set');
+  if (!FINNHUB_KEY) {
+    console.error('ERROR: FINNHUB_API_KEY not set');
     process.exit(1);
   }
   
@@ -256,18 +250,12 @@ async function updateAllPrices() {
           priceMap.set(symbol, price);
         }
       } catch (error) {
-        if (error.message === 'API_LIMIT') {
-          console.log('Waiting 60 seconds for API limit reset...');
-          await delay(60000);
-          i--; // Retry this symbol
-          continue;
-        }
         console.error(`  Error fetching ${symbol}:`, error.message);
       }
       
-      // Rate limit: wait 12 seconds between requests (5/minute limit)
+      // Small delay to be nice to the API (Finnhub allows 60/min, so 1 second is plenty)
       if (i < symbolArray.length - 1) {
-        await delay(12000);
+        await delay(1000);
       }
     }
     
