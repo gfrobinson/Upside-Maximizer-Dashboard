@@ -129,15 +129,36 @@ export default function App() {
         }
       }
 
-      // Fetch company overview for the name
+      // Fetch company name - try OVERVIEW first, then SYMBOL_SEARCH as fallback
       let companyName = symbolUpper;
+      
       try {
+        // First try OVERVIEW (works for larger stocks)
         const overviewResponse = await fetch(
           `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${symbolUpper}&apikey=YIL96BCWV46JKXBR`
         );
         const overviewData = await overviewResponse.json();
+        
         if (overviewData['Name']) {
           companyName = overviewData['Name'];
+        } else {
+          // Fallback to SYMBOL_SEARCH (works for more stocks including OTC)
+          const searchResponse = await fetch(
+            `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${symbolUpper}&apikey=YIL96BCWV46JKXBR`
+          );
+          const searchData = await searchResponse.json();
+          
+          if (searchData['bestMatches'] && searchData['bestMatches'].length > 0) {
+            // Find exact match
+            const exactMatch = searchData['bestMatches'].find(
+              match => match['1. symbol'].toUpperCase() === symbolUpper
+            );
+            if (exactMatch) {
+              companyName = exactMatch['2. name'];
+            } else {
+              companyName = searchData['bestMatches'][0]['2. name'];
+            }
+          }
         }
       } catch (e) {
         console.log('Could not fetch company name, using symbol');
@@ -657,7 +678,7 @@ export default function App() {
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <h3 className="text-2xl font-bold text-white">
-                      {stock.symbol} - {stock.companyName && stock.companyName !== stock.symbol ? stock.companyName : ''}
+                      {stock.symbol}{stock.companyName && stock.companyName !== stock.symbol ? ` - ${stock.companyName}` : ''}
                     </h3>
                     <p className="text-slate-500 text-xs">Added {stock.dateAdded}</p>
                   </div>
