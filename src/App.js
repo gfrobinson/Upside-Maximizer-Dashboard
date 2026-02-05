@@ -32,6 +32,8 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [editingNoteText, setEditingNoteText] = useState('');
+  const [editingUMId, setEditingUMId] = useState(null);
+  const [editingUM, setEditingUM] = useState({ typicalVolatility: '', volatilityMultiplier: '' });
 
   // Listen for auth state changes
   useEffect(() => {
@@ -386,6 +388,31 @@ export default function App() {
     });
   };
 
+  const saveUMSettings = async (stockId) => {
+    if (!user) return;
+    
+    const updatedStocks = stocks.map(stock => {
+      if (stock.id === stockId) {
+        return { 
+          ...stock, 
+          typicalVolatility: parseFloat(editingUM.typicalVolatility),
+          volatilityMultiplier: parseFloat(editingUM.volatilityMultiplier)
+        };
+      }
+      return stock;
+    });
+    
+    setStocks(updatedStocks);
+    setEditingUMId(null);
+    setEditingUM({ typicalVolatility: '', volatilityMultiplier: '' });
+    
+    await savePortfolio(user.uid, {
+      stocks: updatedStocks,
+      alerts,
+      emailPreferences
+    });
+  };
+
   const gainPercent = (stock) => {
     return ((stock.currentPrice - stock.entryPrice) / stock.entryPrice * 100).toFixed(1);
   };
@@ -689,7 +716,7 @@ export default function App() {
               <textarea
                 value={newStock.note}
                 onChange={(e) => setNewStock({...newStock, note: e.target.value})}
-                placeholder="Upside Maximizer execution plan i.e. recover cost basis, sell half, etc."
+                placeholder="Upside Maximizer execution plan i.e., recover cost basis, sell half, etc."
                 rows={2}
                 className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500 resize-none"
               />
@@ -833,27 +860,96 @@ export default function App() {
                 </div>
 
                 <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-slate-300">UM Execution Price:</span>
-                    <span className="text-xl font-bold text-orange-400">${stopLoss.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-slate-300">Distance to UM Price:</span>
-                    <span className={`font-semibold ${parseFloat(distanceToStop) < 5 ? 'text-red-400' : 'text-slate-300'}`}>
-                      {distanceToStop}%
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-400">
-                      Vol: {stock.typicalVolatility}% × {stock.volatilityMultiplier} = {(stock.typicalVolatility * stock.volatilityMultiplier).toFixed(1)}% below high
-                    </span>
-                    {stock.triggered && (
-                      <span className="text-red-400 font-semibold flex items-center gap-1">
-                        <AlertCircle size={16} />
-                        TRIGGERED
-                      </span>
-                    )}
-                  </div>
+                  {editingUMId === stock.id ? (
+                    // Editing mode
+                    <div>
+                      <p className="text-slate-300 font-medium mb-3">Edit UM Settings</p>
+                      <div className="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Typical Volatility (%)</label>
+                          <input
+                            type="number"
+                            value={editingUM.typicalVolatility}
+                            onChange={(e) => setEditingUM({...editingUM, typicalVolatility: e.target.value})}
+                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm"
+                            step="0.5"
+                            min="0"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Multiplier</label>
+                          <input
+                            type="number"
+                            value={editingUM.volatilityMultiplier}
+                            onChange={(e) => setEditingUM({...editingUM, volatilityMultiplier: e.target.value})}
+                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm"
+                            step="0.25"
+                            min="0.5"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-slate-400 mb-3">
+                        New UM Price: ${calculateStopLoss(
+                          stock.highestClose,
+                          parseFloat(editingUM.typicalVolatility) || 0,
+                          parseFloat(editingUM.volatilityMultiplier) || 0
+                        ).toFixed(2)}
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => saveUMSettings(stock.id)}
+                          className="px-3 py-1 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => { setEditingUMId(null); setEditingUM({ typicalVolatility: '', volatilityMultiplier: '' }); }}
+                          className="px-3 py-1 bg-slate-600 text-white text-sm rounded hover:bg-slate-500"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    // Display mode
+                    <>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-slate-300">UM Execution Price:</span>
+                        <span className="text-xl font-bold text-orange-400">${stopLoss.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-slate-300">Distance to UM Price:</span>
+                        <span className={`font-semibold ${parseFloat(distanceToStop) < 5 ? 'text-red-400' : 'text-slate-300'}`}>
+                          {distanceToStop}%
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-400">
+                            Vol: {stock.typicalVolatility}% × {stock.volatilityMultiplier} = {(stock.typicalVolatility * stock.volatilityMultiplier).toFixed(1)}% below high
+                          </span>
+                          <button
+                            onClick={() => { 
+                              setEditingUMId(stock.id); 
+                              setEditingUM({ 
+                                typicalVolatility: stock.typicalVolatility.toString(), 
+                                volatilityMultiplier: stock.volatilityMultiplier.toString() 
+                              }); 
+                            }}
+                            className="text-slate-500 hover:text-slate-300 transition-colors"
+                          >
+                            <Edit3 size={14} />
+                          </button>
+                        </div>
+                        {stock.triggered && (
+                          <span className="text-red-400 font-semibold flex items-center gap-1">
+                            <AlertCircle size={16} />
+                            TRIGGERED
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             );
