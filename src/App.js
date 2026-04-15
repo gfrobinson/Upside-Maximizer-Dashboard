@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, AlertCircle, Plus, Trash2, Bell, Search, LogOut as LogOutIcon, User, HelpCircle, Settings, Mail, Edit3 } from 'lucide-react';
+import { TrendingUp, AlertCircle, Plus, Trash2, Bell, Search, LogOut as LogOutIcon, User, HelpCircle, Settings, Mail, Edit3, Archive, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
 import { auth, savePortfolio, getPortfolio, subscribeToPortfolio, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import AuthModal from './AuthModal';
@@ -8,6 +8,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [stocks, setStocks] = useState([]);
+  const [archivedStocks, setArchivedStocks] = useState([]);
+  const [showArchive, setShowArchive] = useState(false);
   const [newStock, setNewStock] = useState({
     symbol: '',
     companyName: '',
@@ -26,7 +28,7 @@ export default function App() {
   const [showVolatilityHelp, setShowVolatilityHelp] = useState(false);
   const [stockCache, setStockCache] = useState({});
   const [emailPreferences, setEmailPreferences] = useState({
-    summaryFrequency: 'none', // 'none', 'daily', 'friday', 'triggerOnly'
+    summaryFrequency: 'none',
     emailAddress: ''
   });
   const [showSettings, setShowSettings] = useState(false);
@@ -34,6 +36,10 @@ export default function App() {
   const [editingNoteText, setEditingNoteText] = useState('');
   const [editingUMId, setEditingUMId] = useState(null);
   const [editingUM, setEditingUM] = useState({ typicalVolatility: '', volatilityMultiplier: '' });
+  const [editingExecutedDateId, setEditingExecutedDateId] = useState(null);
+  const [editingExecutedDate, setEditingExecutedDate] = useState('');
+  const [closingStockId, setClosingStockId] = useState(null);
+  const [closeForm, setCloseForm] = useState({ closePrice: '', closeDate: '', note: '' });
 
   // Listen for auth state changes
   useEffect(() => {
@@ -55,6 +61,7 @@ export default function App() {
       setStocks(portfolioData.stocks || []);
       setAlerts(portfolioData.alerts || []);
       setLastUpdate(portfolioData.lastUpdate);
+      setArchivedStocks(portfolioData.archivedStocks || []);
       setEmailPreferences(portfolioData.emailPreferences || {
         summaryFrequency: 'none',
         emailAddress: user.email || ''
@@ -79,7 +86,6 @@ export default function App() {
     const FINNHUB_KEY = 'd62dqcpr01qlugepll2gd62dqcpr01qlugepll30';
     const ALPHA_VANTAGE_KEY = 'YIL96BCWV46JKXBR';
     
-    // Check cache first
     if (stockCache[symbolUpper]) {
       const cached = stockCache[symbolUpper];
       setNewStock(prev => ({
@@ -95,7 +101,6 @@ export default function App() {
     setIsFetching(true);
 
     try {
-      // Get company name from Finnhub
       let companyName = symbolUpper;
       
       try {
@@ -103,21 +108,16 @@ export default function App() {
           `https://finnhub.io/api/v1/stock/profile2?symbol=${symbolUpper}&token=${FINNHUB_KEY}`
         );
         const profileData = await profileResponse.json();
-        
         if (profileData && profileData.name) {
           companyName = profileData.name;
         }
-      } catch (e) {
-        console.log('Could not fetch company name from Finnhub');
-      }
+      } catch (e) {}
 
-      // Try Finnhub for price data first
       let latestPrice = null;
       let highestClose = 0;
       let highestCloseDate = new Date().toISOString().split('T')[0];
       let dataSource = null;
       
-      // Try Finnhub candles
       const now = Math.floor(Date.now() / 1000);
       const hundredDaysAgo = now - (100 * 24 * 60 * 60);
       
@@ -130,9 +130,7 @@ export default function App() {
         if (candleData.s === 'ok' && candleData.c && candleData.c.length > 0) {
           const closePrices = candleData.c;
           const timestamps = candleData.t;
-          
           latestPrice = closePrices[closePrices.length - 1];
-          
           for (let i = 0; i < closePrices.length; i++) {
             if (closePrices[i] > highestClose) {
               highestClose = closePrices[i];
@@ -141,98 +139,45 @@ export default function App() {
           }
           dataSource = 'finnhub';
         }
-      } catch (e) {
-        console.log('Finnhub candle request failed');
-      }
+      } catch (e) {}
 
-      // If Finnhub didn't work, fall back to Alpha Vantage
       if (!latestPrice) {
-        console.log('Falling back to Alpha Vantage...');
-        
         const response = await fetch(
           `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbolUpper}&outputsize=compact&apikey=${ALPHA_VANTAGE_KEY}`
         );
         const data = await response.json();
 
-        if (data['Note']) {
-          alert('API call limit reached. Please wait a minute and try again.');
-          setIsFetching(false);
-          return;
-        }
-
-        if (data['Error Message'] || !data['Time Series (Daily)']) {
-          alert('Unable to fetch data. Please check the symbol and try again.');
-          setIsFetching(false);
-          return;
-        }
+        if (data['Note']) { alert('API call limit reached. Please wait a minute and try again.'); setIsFetching(false); return; }
+        if (data['Error Message'] || !data['Time Series (Daily)']) { alert('Unable to fetch data. Please check the symbol and try again.'); setIsFetching(false); return; }
 
         const timeSeries = data['Time Series (Daily)'];
         const dates = Object.keys(timeSeries);
         latestPrice = parseFloat(timeSeries[dates[0]]['4. close']);
-        
         for (const date of dates) {
           const closePrice = parseFloat(timeSeries[date]['4. close']);
-          if (closePrice > highestClose) {
-            highestClose = closePrice;
-            highestCloseDate = date;
-          }
+          if (closePrice > highestClose) { highestClose = closePrice; highestCloseDate = date; }
         }
         dataSource = 'alphavantage';
         
-        // Try to get company name from Alpha Vantage if Finnhub didn't have it
         if (companyName === symbolUpper) {
           try {
-            const searchResponse = await fetch(
-              `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${symbolUpper}&apikey=${ALPHA_VANTAGE_KEY}`
-            );
+            const searchResponse = await fetch(`https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${symbolUpper}&apikey=${ALPHA_VANTAGE_KEY}`);
             const searchData = await searchResponse.json();
-            
             if (searchData['bestMatches'] && searchData['bestMatches'].length > 0) {
-              const exactMatch = searchData['bestMatches'].find(
-                match => match['1. symbol'].toUpperCase() === symbolUpper
-              );
-              if (exactMatch) {
-                companyName = exactMatch['2. name'];
-              } else if (searchData['bestMatches'][0]) {
-                companyName = searchData['bestMatches'][0]['2. name'];
-              }
+              const exactMatch = searchData['bestMatches'].find(m => m['1. symbol'].toUpperCase() === symbolUpper);
+              if (exactMatch) companyName = exactMatch['2. name'];
+              else if (searchData['bestMatches'][0]) companyName = searchData['bestMatches'][0]['2. name'];
             }
-          } catch (e) {
-            console.log('Could not fetch company name from Alpha Vantage');
-          }
+          } catch (e) {}
         }
       }
 
-      if (!latestPrice) {
-        alert('Unable to fetch data. Please check the symbol and try again.');
-        setIsFetching(false);
-        return;
-      }
+      if (!latestPrice) { alert('Unable to fetch data. Please check the symbol and try again.'); setIsFetching(false); return; }
 
-      console.log(`Data fetched from ${dataSource}`);
-
-      // Save to cache
-      setStockCache(prev => ({
-        ...prev,
-        [symbolUpper]: { 
-          price: latestPrice, 
-          companyName: companyName,
-          highestClose: highestClose,
-          highestCloseDate: highestCloseDate
-        }
-      }));
-
-      // Auto-fill the current price, company name, and highest close
-      setNewStock(prev => ({
-        ...prev,
-        currentPrice: latestPrice.toFixed(2),
-        companyName: companyName,
-        highestClose: highestClose.toFixed(2),
-        highestCloseDate: highestCloseDate
-      }));
+      setStockCache(prev => ({ ...prev, [symbolUpper]: { price: latestPrice, companyName, highestClose, highestCloseDate } }));
+      setNewStock(prev => ({ ...prev, currentPrice: latestPrice.toFixed(2), companyName, highestClose: highestClose.toFixed(2), highestCloseDate }));
 
     } catch (error) {
-      console.error('Error fetching stock info:', error);
       alert('Error fetching stock info. Please try again.');
     }
 
@@ -240,24 +185,14 @@ export default function App() {
   };
 
   const addStock = async () => {
-    if (!user) {
-      alert('Please sign in to add stocks');
-      return;
-    }
-
-    if (!newStock.symbol || !newStock.entryPrice || !newStock.currentPrice || !newStock.typicalVolatility) {
-      alert('Please fill in all required fields');
-      return;
-    }
+    if (!user) { alert('Please sign in to add stocks'); return; }
+    if (!newStock.symbol || !newStock.entryPrice || !newStock.currentPrice || !newStock.typicalVolatility) { alert('Please fill in all required fields'); return; }
 
     const entry = parseFloat(newStock.entryPrice);
     const current = parseFloat(newStock.currentPrice);
     const highest = parseFloat(newStock.highestClose) || current;
     
-    if (current < entry * 2) {
-      alert('Stock must be up at least 100% (doubled) to set an Upside Maximizer');
-      return;
-    }
+    if (current < entry * 2) { alert('Stock must be up at least 100% (doubled) to set an Upside Maximizer'); return; }
 
     const stock = {
       id: Date.now(),
@@ -271,151 +206,140 @@ export default function App() {
       typicalVolatility: parseFloat(newStock.typicalVolatility),
       dateAdded: new Date().toISOString().split('T')[0],
       triggered: false,
+      triggeredResolved: false,
+      umExecutedDate: null,
       note: newStock.note || ''
     };
 
     const updatedStocks = [...stocks, stock];
     setStocks(updatedStocks);
-    
-    await savePortfolio(user.uid, {
-      stocks: updatedStocks,
-      alerts
-    });
-    
-    setNewStock({
-      symbol: '',
-      companyName: '',
-      entryPrice: '',
-      currentPrice: '',
-      highestClose: '',
-      highestCloseDate: '',
-      volatilityMultiplier: 2.0,
-      typicalVolatility: '',
-      note: ''
-    });
+    await savePortfolio(user.uid, { stocks: updatedStocks, alerts, emailPreferences, archivedStocks });
+    setNewStock({ symbol: '', companyName: '', entryPrice: '', currentPrice: '', highestClose: '', highestCloseDate: '', volatilityMultiplier: 2.0, typicalVolatility: '', note: '' });
   };
 
   const updateStockPrice = async (id, newPrice) => {
     if (!user) return;
-    
     const price = parseFloat(newPrice);
     if (isNaN(price) || price <= 0) return;
 
     const updatedStocks = stocks.map(stock => {
       if (stock.id !== id) return stock;
-
       const isNewHigh = price > stock.highestClose;
       const newHighest = Math.max(stock.highestClose, price);
       const newHighestDate = isNewHigh ? new Date().toISOString().split('T')[0] : stock.highestCloseDate;
       const stopLoss = calculateStopLoss(newHighest, stock.typicalVolatility, stock.volatilityMultiplier);
 
       if (price <= stopLoss && !stock.triggered) {
-        const alert = {
-          id: Date.now(),
-          symbol: stock.symbol,
-          message: `${stock.symbol} triggered at $${price.toFixed(2)} (UM Price: $${stopLoss.toFixed(2)})`,
-          time: new Date().toISOString()
-        };
+        const alert = { id: Date.now(), symbol: stock.symbol, message: `${stock.symbol} triggered at $${price.toFixed(2)} (UM Price: $${stopLoss.toFixed(2)})`, time: new Date().toISOString() };
         const updatedAlerts = [alert, ...alerts];
         setAlerts(updatedAlerts);
-        
         return { ...stock, currentPrice: price, highestClose: newHighest, highestCloseDate: newHighestDate, triggered: true };
       }
-
       return { ...stock, currentPrice: price, highestClose: newHighest, highestCloseDate: newHighestDate };
     });
 
     setStocks(updatedStocks);
-    
-    await savePortfolio(user.uid, {
-      stocks: updatedStocks,
-      alerts
+    await savePortfolio(user.uid, { stocks: updatedStocks, alerts, emailPreferences, archivedStocks });
+  };
+
+  const resolveTriggered = async (id) => {
+    if (!user) return;
+    const today = new Date().toISOString().split('T')[0];
+    const updatedStocks = stocks.map(stock => {
+      if (stock.id !== id) return stock;
+      return { ...stock, triggered: false, triggeredResolved: true, umExecutedDate: today };
     });
+    setStocks(updatedStocks);
+    await savePortfolio(user.uid, { stocks: updatedStocks, alerts, emailPreferences, archivedStocks });
+  };
+
+  const saveExecutedDate = async (id, newDate) => {
+    if (!user) return;
+    const updatedStocks = stocks.map(stock => {
+      if (stock.id !== id) return stock;
+      return { ...stock, umExecutedDate: newDate };
+    });
+    setStocks(updatedStocks);
+    setEditingExecutedDateId(null);
+    setEditingExecutedDate('');
+    await savePortfolio(user.uid, { stocks: updatedStocks, alerts, emailPreferences, archivedStocks });
+  };
+
+  const closePosition = async (id) => {
+    if (!user) return;
+    const stock = stocks.find(s => s.id === id);
+    if (!stock) return;
+
+    const closePrice = parseFloat(closeForm.closePrice) || stock.currentPrice;
+    const closeDate = closeForm.closeDate || new Date().toISOString().split('T')[0];
+    const totalGain = ((closePrice - stock.entryPrice) / stock.entryPrice * 100).toFixed(1);
+
+    const archivedStock = {
+      ...stock,
+      closePrice,
+      closeDate,
+      closeNote: closeForm.note || '',
+      totalGainAtClose: totalGain,
+      archivedAt: new Date().toISOString()
+    };
+
+    const updatedStocks = stocks.filter(s => s.id !== id);
+    const updatedArchive = [archivedStock, ...archivedStocks];
+
+    setStocks(updatedStocks);
+    setArchivedStocks(updatedArchive);
+    setClosingStockId(null);
+    setCloseForm({ closePrice: '', closeDate: '', note: '' });
+
+    await savePortfolio(user.uid, { stocks: updatedStocks, alerts, emailPreferences, archivedStocks: updatedArchive });
   };
 
   const deleteStock = async (id) => {
     if (!user) return;
-    
     const updatedStocks = stocks.filter(stock => stock.id !== id);
     setStocks(updatedStocks);
-    
-    await savePortfolio(user.uid, {
-      stocks: updatedStocks,
-      alerts
-    });
+    await savePortfolio(user.uid, { stocks: updatedStocks, alerts, emailPreferences, archivedStocks });
+  };
+
+  const deleteArchivedStock = async (id) => {
+    if (!user) return;
+    const updatedArchive = archivedStocks.filter(s => s.id !== id);
+    setArchivedStocks(updatedArchive);
+    await savePortfolio(user.uid, { stocks, alerts, emailPreferences, archivedStocks: updatedArchive });
   };
 
   const handleLogOut = async () => {
     try {
       await logOut();
-      setStocks([]);
-      setAlerts([]);
-      setLastUpdate(null);
-    } catch (error) {
-      console.error('Error logging out:', error);
-    }
+      setStocks([]); setAlerts([]); setLastUpdate(null); setArchivedStocks([]);
+    } catch (error) {}
   };
 
   const saveEmailPreferences = async (newPrefs) => {
     if (!user) return;
-    
     setEmailPreferences(newPrefs);
-    await savePortfolio(user.uid, {
-      stocks,
-      alerts,
-      emailPreferences: newPrefs
-    });
+    await savePortfolio(user.uid, { stocks, alerts, emailPreferences: newPrefs, archivedStocks });
   };
 
   const saveNote = async (stockId, newNote) => {
     if (!user) return;
-    
-    const updatedStocks = stocks.map(stock => {
-      if (stock.id === stockId) {
-        return { ...stock, note: newNote };
-      }
-      return stock;
-    });
-    
+    const updatedStocks = stocks.map(stock => stock.id === stockId ? { ...stock, note: newNote } : stock);
     setStocks(updatedStocks);
     setEditingNoteId(null);
     setEditingNoteText('');
-    
-    await savePortfolio(user.uid, {
-      stocks: updatedStocks,
-      alerts,
-      emailPreferences
-    });
+    await savePortfolio(user.uid, { stocks: updatedStocks, alerts, emailPreferences, archivedStocks });
   };
 
   const saveUMSettings = async (stockId) => {
     if (!user) return;
-    
-    const updatedStocks = stocks.map(stock => {
-      if (stock.id === stockId) {
-        return { 
-          ...stock, 
-          typicalVolatility: parseFloat(editingUM.typicalVolatility),
-          volatilityMultiplier: parseFloat(editingUM.volatilityMultiplier)
-        };
-      }
-      return stock;
-    });
-    
+    const updatedStocks = stocks.map(stock => stock.id === stockId ? { ...stock, typicalVolatility: parseFloat(editingUM.typicalVolatility), volatilityMultiplier: parseFloat(editingUM.volatilityMultiplier) } : stock);
     setStocks(updatedStocks);
     setEditingUMId(null);
     setEditingUM({ typicalVolatility: '', volatilityMultiplier: '' });
-    
-    await savePortfolio(user.uid, {
-      stocks: updatedStocks,
-      alerts,
-      emailPreferences
-    });
+    await savePortfolio(user.uid, { stocks: updatedStocks, alerts, emailPreferences, archivedStocks });
   };
 
-  const gainPercent = (stock) => {
-    return ((stock.currentPrice - stock.entryPrice) / stock.entryPrice * 100).toFixed(1);
-  };
+  const gainPercent = (stock) => ((stock.currentPrice - stock.entryPrice) / stock.entryPrice * 100).toFixed(1);
 
   if (loading) {
     return (
@@ -443,7 +367,6 @@ export default function App() {
               <Mail className="text-emerald-400" size={24} />
               <h2 className="text-xl font-bold text-white">Email Notifications</h2>
             </div>
-            
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">Email Address</label>
@@ -455,94 +378,89 @@ export default function App() {
                   className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
-              
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-3">Email Frequency</label>
-                
                 <div className="space-y-3">
-                  <label className="flex items-start gap-3 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="summaryFrequency"
-                      value="none"
-                      checked={emailPreferences.summaryFrequency === 'none'}
-                      onChange={(e) => setEmailPreferences({...emailPreferences, summaryFrequency: e.target.value})}
-                      className="mt-1 w-4 h-4 bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500"
-                    />
-                    <div className="text-slate-300">
-                      <span className="font-medium">No Emails</span>
-                      <p className="text-sm text-slate-400">I'll check the website manually</p>
-                    </div>
-                  </label>
-                  
-                  <label className="flex items-start gap-3 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="summaryFrequency"
-                      value="daily"
-                      checked={emailPreferences.summaryFrequency === 'daily'}
-                      onChange={(e) => setEmailPreferences({...emailPreferences, summaryFrequency: e.target.value})}
-                      className="mt-1 w-4 h-4 bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500"
-                    />
-                    <div className="text-slate-300">
-                      <span className="font-medium">Daily Summary</span>
-                      <p className="text-sm text-slate-400">Receive a summary every day after market close, plus trigger alerts</p>
-                    </div>
-                  </label>
-                  
-                  <label className="flex items-start gap-3 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="summaryFrequency"
-                      value="friday"
-                      checked={emailPreferences.summaryFrequency === 'friday'}
-                      onChange={(e) => setEmailPreferences({...emailPreferences, summaryFrequency: e.target.value})}
-                      className="mt-1 w-4 h-4 bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500"
-                    />
-                    <div className="text-slate-300">
-                      <span className="font-medium">Friday Summary</span>
-                      <p className="text-sm text-slate-400">Receive a weekly summary on Fridays, plus trigger alerts</p>
-                    </div>
-                  </label>
-                  
-                  <label className="flex items-start gap-3 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="summaryFrequency"
-                      value="triggerOnly"
-                      checked={emailPreferences.summaryFrequency === 'triggerOnly'}
-                      onChange={(e) => setEmailPreferences({...emailPreferences, summaryFrequency: e.target.value})}
-                      className="mt-1 w-4 h-4 bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500"
-                    />
-                    <div className="text-slate-300">
-                      <span className="font-medium">Trigger Alerts Only</span>
-                      <p className="text-sm text-slate-400">Only email me when a stock hits its UM Execution Price</p>
-                    </div>
-                  </label>
+                  {[
+                    { value: 'none', label: 'No Emails', desc: "I'll check the website manually" },
+                    { value: 'daily', label: 'Daily Summary', desc: 'Receive a summary every day after market close, plus trigger alerts' },
+                    { value: 'friday', label: 'Friday Summary', desc: 'Receive a weekly summary on Fridays, plus trigger alerts' },
+                    { value: 'triggerOnly', label: 'Trigger Alerts Only', desc: 'Only email me when a stock hits its UM Execution Price' },
+                  ].map(opt => (
+                    <label key={opt.value} className="flex items-start gap-3 cursor-pointer">
+                      <input type="radio" name="summaryFrequency" value={opt.value}
+                        checked={emailPreferences.summaryFrequency === opt.value}
+                        onChange={(e) => setEmailPreferences({...emailPreferences, summaryFrequency: e.target.value})}
+                        className="mt-1 w-4 h-4 bg-slate-700 border-slate-600 text-emerald-500 focus:ring-emerald-500"
+                      />
+                      <div className="text-slate-300">
+                        <span className="font-medium">{opt.label}</span>
+                        <p className="text-sm text-slate-400">{opt.desc}</p>
+                      </div>
+                    </label>
+                  ))}
                 </div>
               </div>
             </div>
-            
             <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => setShowSettings(false)}
-                className="flex-1 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  saveEmailPreferences(emailPreferences);
-                  setShowSettings(false);
-                }}
-                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
-              >
-                Save
+              <button onClick={() => setShowSettings(false)} className="flex-1 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors">Cancel</button>
+              <button onClick={() => { saveEmailPreferences(emailPreferences); setShowSettings(false); }} className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Close Position Modal */}
+      {closingStockId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-700">
+            <div className="flex items-center gap-2 mb-4">
+              <Archive className="text-amber-400" size={24} />
+              <h2 className="text-xl font-bold text-white">Close Position</h2>
+            </div>
+            <p className="text-slate-400 text-sm mb-4">This will move the position to your archive. You can still view it there.</p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Close Price</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={closeForm.closePrice}
+                  onChange={(e) => setCloseForm({...closeForm, closePrice: e.target.value})}
+                  placeholder={`${stocks.find(s => s.id === closingStockId)?.currentPrice?.toFixed(2) || ''} (current price)`}
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Close Date</label>
+                <input
+                  type="date"
+                  value={closeForm.closeDate}
+                  onChange={(e) => setCloseForm({...closeForm, closeDate: e.target.value})}
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Note (optional)</label>
+                <textarea
+                  value={closeForm.note}
+                  onChange={(e) => setCloseForm({...closeForm, note: e.target.value})}
+                  placeholder="e.g. Sold half position, kept remainder"
+                  rows={2}
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500 resize-none"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => { setClosingStockId(null); setCloseForm({ closePrice: '', closeDate: '', note: '' }); }} className="flex-1 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors">Cancel</button>
+              <button onClick={() => closePosition(closingStockId)} className="flex-1 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors flex items-center justify-center gap-2">
+                <Archive size={16} /> Close Position
               </button>
             </div>
           </div>
         </div>
       )}
+
       <div className="max-w-6xl mx-auto">
         <div className="bg-slate-800/50 backdrop-blur rounded-lg shadow-2xl p-6 mb-6 border border-slate-700">
           <div className="flex items-center justify-between mb-6">
@@ -550,11 +468,7 @@ export default function App() {
               <TrendingUp className="text-emerald-400" size={32} />
               <div>
                 <h1 className="text-3xl font-bold text-white">Upside Maximizer</h1>
-                {lastUpdate && (
-                  <p className="text-sm text-slate-400">
-                    Last updated: {new Date(lastUpdate).toLocaleString()}
-                  </p>
-                )}
+                {lastUpdate && <p className="text-sm text-slate-400">Last updated: {new Date(lastUpdate).toLocaleString()}</p>}
               </div>
             </div>
             <div className="flex items-center gap-4">
@@ -563,20 +477,12 @@ export default function App() {
                   <User size={20} />
                   <span className="font-medium">{user.email || user.displayName}</span>
                 </div>
-                <p className="text-xs text-slate-400">
-                  {stocks.length} {stocks.length === 1 ? 'stock' : 'stocks'} tracked
-                </p>
+                <p className="text-xs text-slate-400">{stocks.length} {stocks.length === 1 ? 'stock' : 'stocks'} tracked</p>
               </div>
-              <button
-                onClick={() => setShowSettings(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
-              >
+              <button onClick={() => setShowSettings(true)} className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors">
                 <Settings size={20} />
               </button>
-              <button
-                onClick={handleLogOut}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
-              >
+              <button onClick={handleLogOut} className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors">
                 <LogOutIcon size={20} />
                 Sign Out
               </button>
@@ -591,158 +497,75 @@ export default function App() {
           {/* Add New Stock Form */}
           <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700 mb-4">
             <h3 className="text-lg font-semibold text-white mb-4">Add New Stock</h3>
-            
-            {/* Symbol and Lookup */}
             <div className="flex gap-2 mb-4">
               <div className="flex-1">
                 <label className="block text-sm font-medium text-slate-300 mb-2">Stock Symbol</label>
-                <input
-                  type="text"
-                  value={newStock.symbol}
-                  onChange={(e) => setNewStock({...newStock, symbol: e.target.value.toUpperCase(), companyName: ''})}
-                  placeholder="e.g., AAPL, NVDA"
-                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
-                />
+                <input type="text" value={newStock.symbol} onChange={(e) => setNewStock({...newStock, symbol: e.target.value.toUpperCase(), companyName: ''})} placeholder="e.g., AAPL, NVDA" className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500" />
               </div>
               <div className="flex items-end">
-                <button
-                  onClick={fetchStockInfo}
-                  disabled={isFetching || !newStock.symbol}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                >
+                <button onClick={fetchStockInfo} disabled={isFetching || !newStock.symbol} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
                   <Search size={18} />
                   {isFetching ? 'Looking up...' : 'Look Up'}
                 </button>
               </div>
             </div>
 
-            {/* Company Name Display */}
             {newStock.companyName && (
               <div className="mb-4 p-3 bg-slate-800 rounded-lg border border-slate-600">
                 <p className="text-lg font-semibold text-white">{newStock.companyName}</p>
                 <p className="text-sm text-slate-400">{newStock.symbol} · Last Close: ${newStock.currentPrice}</p>
-                {newStock.highestClose && (
-                  <p className="text-sm text-emerald-400">
-                    Highest Close: ${newStock.highestClose} ({newStock.highestCloseDate})
-                  </p>
-                )}
+                {newStock.highestClose && <p className="text-sm text-emerald-400">Highest Close: ${newStock.highestClose} ({newStock.highestCloseDate})</p>}
               </div>
             )}
 
-            {/* Price Inputs */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">Your Entry Price</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={newStock.entryPrice}
-                  onChange={(e) => setNewStock({...newStock, entryPrice: e.target.value})}
-                  placeholder="What you paid per share"
-                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
-                />
+                <input type="number" step="0.01" value={newStock.entryPrice} onChange={(e) => setNewStock({...newStock, entryPrice: e.target.value})} placeholder="What you paid per share" className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500" />
               </div>
-              
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">Last Close</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={newStock.currentPrice}
-                  onChange={(e) => setNewStock({...newStock, currentPrice: e.target.value})}
-                  placeholder="Auto-filled from lookup"
-                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
-                />
+                <input type="number" step="0.01" value={newStock.currentPrice} onChange={(e) => setNewStock({...newStock, currentPrice: e.target.value})} placeholder="Auto-filled from lookup" className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500" />
               </div>
             </div>
 
-            {/* Volatility Settings */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <label className="block text-sm font-medium text-slate-300">Typical Volatility (%)</label>
-                  <button
-                    onClick={() => setShowVolatilityHelp(!showVolatilityHelp)}
-                    className="text-slate-400 hover:text-slate-300"
-                  >
-                    <HelpCircle size={16} />
-                  </button>
+                  <button onClick={() => setShowVolatilityHelp(!showVolatilityHelp)} className="text-slate-400 hover:text-slate-300"><HelpCircle size={16} /></button>
                 </div>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={newStock.typicalVolatility}
-                  onChange={(e) => setNewStock({...newStock, typicalVolatility: e.target.value})}
-                  placeholder="e.g., 8"
-                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
-                />
+                <input type="number" step="0.1" value={newStock.typicalVolatility} onChange={(e) => setNewStock({...newStock, typicalVolatility: e.target.value})} placeholder="e.g., 8" className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500" />
               </div>
-              
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">Multiplier</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={newStock.volatilityMultiplier}
-                  onChange={(e) => setNewStock({...newStock, volatilityMultiplier: e.target.value})}
-                  placeholder="e.g., 2.0"
-                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500"
-                />
+                <input type="number" step="0.1" value={newStock.volatilityMultiplier} onChange={(e) => setNewStock({...newStock, volatilityMultiplier: e.target.value})} placeholder="e.g., 2.0" className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500" />
               </div>
             </div>
 
-            {/* Volatility Help Text */}
             {showVolatilityHelp && (
               <div className="mb-4 p-4 bg-blue-900/30 rounded-lg border border-blue-700 text-sm text-slate-300">
                 <p className="font-semibold text-white mb-2">How to determine Typical Volatility:</p>
-                <p className="mb-2">
-                  Look at a chart of the stock during a period when it was <strong>trending up overall</strong>. 
-                  Measure several pullbacks from local highs to local lows (the temporary dips before it continued higher).
-                </p>
-                <p className="mb-2">
-                  Ignore extreme outliers and note the <strong>typical pullback size</strong>. For example, if most pullbacks 
-                  are between 8-12%, enter 10 as your typical volatility.
-                </p>
-                <p>
-                  The <strong>multiplier</strong> gives the stock breathing room. A multiplier of 2.0 means your UM execution price will be 
-                  set at 2× the typical volatility below the highest close.
-                </p>
+                <p className="mb-2">Look at a chart of the stock during a period when it was <strong>trending up overall</strong>. Measure several pullbacks from local highs to local lows (the temporary dips before it continued higher).</p>
+                <p className="mb-2">Ignore extreme outliers and note the <strong>typical pullback size</strong>. For example, if most pullbacks are between 8-12%, enter 10 as your typical volatility.</p>
+                <p>The <strong>multiplier</strong> gives the stock breathing room. A multiplier of 2.0 means your UM execution price will be set at 2× the typical volatility below the highest close.</p>
               </div>
             )}
 
-            {/* Note Field */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-slate-300 mb-2">Note (optional)</label>
-              <textarea
-                value={newStock.note}
-                onChange={(e) => setNewStock({...newStock, note: e.target.value})}
-                placeholder="Upside Maximizer execution plan i.e. recover cost basis, sell half, etc."
-                rows={2}
-                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500 resize-none"
-              />
+              <textarea value={newStock.note} onChange={(e) => setNewStock({...newStock, note: e.target.value})} placeholder="Upside Maximizer execution plan i.e. recover cost basis, sell half, etc." rows={2} className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-emerald-500 resize-none" />
             </div>
 
-            {/* UM Execution Price Preview */}
             {newStock.highestClose && newStock.typicalVolatility && (
               <div className="mb-4 p-3 bg-slate-800 rounded-lg border border-slate-600">
                 <p className="text-sm text-slate-400">UM Execution Price Preview (based on highest close):</p>
-                <p className="text-xl font-bold text-orange-400">
-                  ${calculateStopLoss(
-                    parseFloat(newStock.highestClose), 
-                    parseFloat(newStock.typicalVolatility), 
-                    parseFloat(newStock.volatilityMultiplier)
-                  ).toFixed(2)}
-                </p>
-                <p className="text-xs text-slate-500">
-                  {newStock.typicalVolatility}% × {newStock.volatilityMultiplier} = {(parseFloat(newStock.typicalVolatility) * parseFloat(newStock.volatilityMultiplier)).toFixed(1)}% below highest close (${newStock.highestClose})
-                </p>
+                <p className="text-xl font-bold text-orange-400">${calculateStopLoss(parseFloat(newStock.highestClose), parseFloat(newStock.typicalVolatility), parseFloat(newStock.volatilityMultiplier)).toFixed(2)}</p>
+                <p className="text-xs text-slate-500">{newStock.typicalVolatility}% × {newStock.volatilityMultiplier} = {(parseFloat(newStock.typicalVolatility) * parseFloat(newStock.volatilityMultiplier)).toFixed(1)}% below highest close (${newStock.highestClose})</p>
               </div>
             )}
 
-            <button
-              onClick={addStock}
-              className="w-full bg-emerald-600 text-white py-3 rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 font-semibold"
-            >
+            <button onClick={addStock} className="w-full bg-emerald-600 text-white py-3 rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 font-semibold">
               <Plus size={20} />
               Add Stock to Tracker
             </button>
@@ -777,8 +600,10 @@ export default function App() {
               <div
                 key={stock.id}
                 className={`backdrop-blur rounded-lg shadow-xl p-6 border ${
-                  stock.triggered 
-                    ? 'bg-red-900/30 border-red-700' 
+                  stock.triggered
+                    ? 'bg-red-900/30 border-red-700'
+                    : stock.triggeredResolved
+                    ? 'bg-slate-800/50 border-red-800/50'
                     : 'bg-slate-800/50 border-slate-700'
                 }`}
               >
@@ -792,51 +617,32 @@ export default function App() {
                     {/* Editable Note */}
                     {editingNoteId === stock.id ? (
                       <div className="mt-2">
-                        <textarea
-                          value={editingNoteText}
-                          onChange={(e) => setEditingNoteText(e.target.value)}
-                          placeholder="Upside Maximizer execution plan i.e. recover cost basis, sell half, etc."
-                          rows={2}
-                          className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:ring-2 focus:ring-emerald-500 resize-none"
-                          autoFocus
-                        />
+                        <textarea value={editingNoteText} onChange={(e) => setEditingNoteText(e.target.value)} placeholder="Upside Maximizer execution plan i.e. recover cost basis, sell half, etc." rows={2} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:ring-2 focus:ring-emerald-500 resize-none" autoFocus />
                         <div className="flex gap-2 mt-2">
-                          <button
-                            onClick={() => saveNote(stock.id, editingNoteText)}
-                            className="px-3 py-1 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={() => { setEditingNoteId(null); setEditingNoteText(''); }}
-                            className="px-3 py-1 bg-slate-600 text-white text-sm rounded hover:bg-slate-500"
-                          >
-                            Cancel
-                          </button>
+                          <button onClick={() => saveNote(stock.id, editingNoteText)} className="px-3 py-1 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700">Save</button>
+                          <button onClick={() => { setEditingNoteId(null); setEditingNoteText(''); }} className="px-3 py-1 bg-slate-600 text-white text-sm rounded hover:bg-slate-500">Cancel</button>
                         </div>
                       </div>
                     ) : (
                       <div className="flex items-start gap-2 mt-1">
-                        {stock.note ? (
-                          <p className="text-slate-400 text-sm italic">"{stock.note}"</p>
-                        ) : (
-                          <p className="text-slate-600 text-sm italic">No note</p>
-                        )}
-                        <button
-                          onClick={() => { setEditingNoteId(stock.id); setEditingNoteText(stock.note || ''); }}
-                          className="text-slate-500 hover:text-slate-300 transition-colors"
-                        >
-                          <Edit3 size={14} />
-                        </button>
+                        {stock.note ? <p className="text-slate-400 text-sm italic">"{stock.note}"</p> : <p className="text-slate-600 text-sm italic">No note</p>}
+                        <button onClick={() => { setEditingNoteId(stock.id); setEditingNoteText(stock.note || ''); }} className="text-slate-500 hover:text-slate-300 transition-colors"><Edit3 size={14} /></button>
                       </div>
                     )}
                   </div>
-                  <button
-                    onClick={() => deleteStock(stock.id)}
-                    className="text-red-400 hover:text-red-300 transition-colors ml-4"
-                  >
-                    <Trash2 size={20} />
-                  </button>
+                  <div className="flex items-center gap-2 ml-4">
+                    <button
+                      onClick={() => { setClosingStockId(stock.id); setCloseForm({ closePrice: stock.currentPrice.toFixed(2), closeDate: new Date().toISOString().split('T')[0], note: '' }); }}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-slate-700 text-amber-400 text-sm rounded-lg hover:bg-slate-600 transition-colors border border-slate-600"
+                      title="Close position and archive"
+                    >
+                      <Archive size={14} />
+                      Close
+                    </button>
+                    <button onClick={() => deleteStock(stock.id)} className="text-red-400 hover:text-red-300 transition-colors">
+                      <Trash2 size={20} />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
@@ -861,57 +667,25 @@ export default function App() {
 
                 <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700">
                   {editingUMId === stock.id ? (
-                    // Editing mode
                     <div>
                       <p className="text-slate-300 font-medium mb-3">Edit UM Settings</p>
                       <div className="grid grid-cols-2 gap-3 mb-3">
                         <div>
                           <label className="block text-xs text-slate-400 mb-1">Typical Volatility (%)</label>
-                          <input
-                            type="number"
-                            value={editingUM.typicalVolatility}
-                            onChange={(e) => setEditingUM({...editingUM, typicalVolatility: e.target.value})}
-                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm"
-                            step="0.5"
-                            min="0"
-                          />
+                          <input type="number" value={editingUM.typicalVolatility} onChange={(e) => setEditingUM({...editingUM, typicalVolatility: e.target.value})} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm" step="0.5" min="0" />
                         </div>
                         <div>
                           <label className="block text-xs text-slate-400 mb-1">Multiplier</label>
-                          <input
-                            type="number"
-                            value={editingUM.volatilityMultiplier}
-                            onChange={(e) => setEditingUM({...editingUM, volatilityMultiplier: e.target.value})}
-                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm"
-                            step="0.25"
-                            min="0.5"
-                          />
+                          <input type="number" value={editingUM.volatilityMultiplier} onChange={(e) => setEditingUM({...editingUM, volatilityMultiplier: e.target.value})} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm" step="0.25" min="0.5" />
                         </div>
                       </div>
-                      <p className="text-xs text-slate-400 mb-3">
-                        New UM Price: ${calculateStopLoss(
-                          stock.highestClose,
-                          parseFloat(editingUM.typicalVolatility) || 0,
-                          parseFloat(editingUM.volatilityMultiplier) || 0
-                        ).toFixed(2)}
-                      </p>
+                      <p className="text-xs text-slate-400 mb-3">New UM Price: ${calculateStopLoss(stock.highestClose, parseFloat(editingUM.typicalVolatility) || 0, parseFloat(editingUM.volatilityMultiplier) || 0).toFixed(2)}</p>
                       <div className="flex gap-2">
-                        <button
-                          onClick={() => saveUMSettings(stock.id)}
-                          className="px-3 py-1 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700"
-                        >
-                          Save
-                        </button>
-                        <button
-                          onClick={() => { setEditingUMId(null); setEditingUM({ typicalVolatility: '', volatilityMultiplier: '' }); }}
-                          className="px-3 py-1 bg-slate-600 text-white text-sm rounded hover:bg-slate-500"
-                        >
-                          Cancel
-                        </button>
+                        <button onClick={() => saveUMSettings(stock.id)} className="px-3 py-1 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700">Save</button>
+                        <button onClick={() => { setEditingUMId(null); setEditingUM({ typicalVolatility: '', volatilityMultiplier: '' }); }} className="px-3 py-1 bg-slate-600 text-white text-sm rounded hover:bg-slate-500">Cancel</button>
                       </div>
                     </div>
                   ) : (
-                    // Display mode
                     <>
                       <div className="flex justify-between items-center mb-2">
                         <span className="text-slate-300">UM Execution Price:</span>
@@ -919,33 +693,59 @@ export default function App() {
                       </div>
                       <div className="flex justify-between items-center mb-2">
                         <span className="text-slate-300">Distance to UM Price:</span>
-                        <span className={`font-semibold ${parseFloat(distanceToStop) < 5 ? 'text-red-400' : 'text-slate-300'}`}>
-                          {distanceToStop}%
-                        </span>
+                        <span className={`font-semibold ${parseFloat(distanceToStop) < 5 ? 'text-red-400' : 'text-slate-300'}`}>{distanceToStop}%</span>
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <div className="flex items-center gap-2">
-                          <span className="text-slate-400">
-                            Vol: {stock.typicalVolatility}% × {stock.volatilityMultiplier} = {(stock.typicalVolatility * stock.volatilityMultiplier).toFixed(1)}% below high
-                          </span>
-                          <button
-                            onClick={() => { 
-                              setEditingUMId(stock.id); 
-                              setEditingUM({ 
-                                typicalVolatility: stock.typicalVolatility.toString(), 
-                                volatilityMultiplier: stock.volatilityMultiplier.toString() 
-                              }); 
-                            }}
-                            className="text-slate-500 hover:text-slate-300 transition-colors"
-                          >
-                            <Edit3 size={14} />
-                          </button>
+                          <span className="text-slate-400">Vol: {stock.typicalVolatility}% × {stock.volatilityMultiplier} = {(stock.typicalVolatility * stock.volatilityMultiplier).toFixed(1)}% below high</span>
+                          <button onClick={() => { setEditingUMId(stock.id); setEditingUM({ typicalVolatility: stock.typicalVolatility.toString(), volatilityMultiplier: stock.volatilityMultiplier.toString() }); }} className="text-slate-500 hover:text-slate-300 transition-colors"><Edit3 size={14} /></button>
                         </div>
+
+                        {/* Triggered status area */}
                         {stock.triggered && (
-                          <span className="text-red-400 font-semibold flex items-center gap-1">
-                            <AlertCircle size={16} />
-                            TRIGGERED
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-red-400 font-semibold flex items-center gap-1">
+                              <AlertCircle size={16} />
+                              TRIGGERED
+                            </span>
+                            <button
+                              onClick={() => resolveTriggered(stock.id)}
+                              className="px-2 py-0.5 bg-slate-700 text-slate-300 text-xs rounded hover:bg-slate-600 border border-slate-600 transition-colors"
+                            >
+                              Resolve
+                            </button>
+                          </div>
+                        )}
+
+                        {!stock.triggered && stock.triggeredResolved && (
+                          <div className="flex items-center gap-2">
+                            <CheckCircle size={14} className="text-red-400/70" />
+                            {editingExecutedDateId === stock.id ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="date"
+                                  value={editingExecutedDate}
+                                  onChange={(e) => setEditingExecutedDate(e.target.value)}
+                                  className="px-2 py-0.5 bg-slate-700 border border-slate-600 rounded text-white text-xs"
+                                  autoFocus
+                                />
+                                <button onClick={() => saveExecutedDate(stock.id, editingExecutedDate)} className="px-2 py-0.5 bg-emerald-600 text-white text-xs rounded hover:bg-emerald-700">Save</button>
+                                <button onClick={() => { setEditingExecutedDateId(null); setEditingExecutedDate(''); }} className="px-2 py-0.5 bg-slate-600 text-white text-xs rounded hover:bg-slate-500">✕</button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1">
+                                <span className="text-red-400/70 text-xs">
+                                  UM Executed - {stock.umExecutedDate || 'unknown date'}
+                                </span>
+                                <button
+                                  onClick={() => { setEditingExecutedDateId(stock.id); setEditingExecutedDate(stock.umExecutedDate || new Date().toISOString().split('T')[0]); }}
+                                  className="text-slate-600 hover:text-slate-400 transition-colors"
+                                >
+                                  <Edit3 size={12} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </>
@@ -961,6 +761,62 @@ export default function App() {
             <TrendingUp className="mx-auto text-slate-600 mb-4" size={48} />
             <p className="text-slate-400 text-lg">No stocks being tracked yet</p>
             <p className="text-slate-500 text-sm mt-2">Add a stock that's up 100%+ to get started</p>
+          </div>
+        )}
+
+        {/* Archived Positions */}
+        {archivedStocks.length > 0 && (
+          <div className="mt-6">
+            <button
+              onClick={() => setShowArchive(!showArchive)}
+              className="w-full flex items-center justify-between px-6 py-4 bg-slate-800/50 backdrop-blur rounded-lg border border-slate-700 hover:bg-slate-700/50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <Archive className="text-slate-400" size={20} />
+                <span className="text-slate-300 font-medium">Closed Positions</span>
+                <span className="bg-slate-700 text-slate-400 text-xs px-2 py-0.5 rounded-full">{archivedStocks.length}</span>
+              </div>
+              {showArchive ? <ChevronUp className="text-slate-400" size={20} /> : <ChevronDown className="text-slate-400" size={20} />}
+            </button>
+
+            {showArchive && (
+              <div className="mt-2 space-y-3">
+                {archivedStocks.map(stock => (
+                  <div key={stock.id} className="bg-slate-800/30 backdrop-blur rounded-lg p-5 border border-slate-700/50">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-300">
+                          {stock.symbol}{stock.companyName && stock.companyName !== stock.symbol ? ` - ${stock.companyName}` : ''}
+                        </h3>
+                        <p className="text-slate-500 text-xs">Added {stock.dateAdded} · Closed {stock.closeDate}</p>
+                        {stock.closeNote && <p className="text-slate-500 text-sm italic mt-1">"{stock.closeNote}"</p>}
+                      </div>
+                      <button onClick={() => deleteArchivedStock(stock.id)} className="text-slate-600 hover:text-red-400 transition-colors ml-4">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div>
+                        <p className="text-slate-500 text-xs">Entry Price</p>
+                        <p className="text-slate-300 font-medium">${stock.entryPrice.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 text-xs">Close Price</p>
+                        <p className="text-slate-300 font-medium">${parseFloat(stock.closePrice).toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 text-xs">Highest Close</p>
+                        <p className="text-slate-300 font-medium">${stock.highestClose.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 text-xs">Total Gain at Close</p>
+                        <p className="text-emerald-400/80 font-medium">+{stock.totalGainAtClose}%</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
