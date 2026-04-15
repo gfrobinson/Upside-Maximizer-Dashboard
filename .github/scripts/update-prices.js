@@ -16,7 +16,7 @@ admin.initializeApp({
 const db = admin.firestore();
 const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
 const ALPHA_VANTAGE_KEY = process.env.ALPHA_VANTAGE_API_KEY;
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || 'noreply@upsidemaximizer.com';
 
 // Rate limiting helper
@@ -28,28 +28,28 @@ function calculateUMPrice(highestClose, typicalVol, multiplier) {
   return highestClose * (1 - volatilityDecline / 100);
 }
 
-// Send email via SendGrid
+// Send email via Resend
 async function sendEmail(to, subject, htmlContent) {
-  if (!SENDGRID_API_KEY) {
-    console.log('  SendGrid not configured, skipping email');
+  if (!RESEND_API_KEY) {
+    console.log('  Resend not configured, skipping email');
     return;
   }
 
   const data = JSON.stringify({
-    personalizations: [{ to: [{ email: to }] }],
-    from: { email: EMAIL_FROM, name: 'Upside Maximizer' },
+    from: `Upside Maximizer <${EMAIL_FROM}>`,
+    to: [to],
     subject: subject,
-    content: [{ type: 'text/html', value: htmlContent }]
+    html: htmlContent
   });
 
   return new Promise((resolve, reject) => {
     const req = https.request({
-      hostname: 'api.sendgrid.com',
+      hostname: 'api.resend.com',
       port: 443,
-      path: '/v3/mail/send',
+      path: '/emails',
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${SENDGRID_API_KEY}`,
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(data)
       }
@@ -209,7 +209,6 @@ async function fetchPriceAlphaVantage(symbol) {
 
 // Fetch price - try Finnhub first, then Alpha Vantage
 async function fetchPrice(symbol) {
-  // Try Finnhub first
   let price = await fetchPriceFinnhub(symbol);
   
   if (price) {
@@ -217,7 +216,6 @@ async function fetchPrice(symbol) {
     return price;
   }
   
-  // Fall back to Alpha Vantage
   if (ALPHA_VANTAGE_KEY) {
     price = await fetchPriceAlphaVantage(symbol);
     
@@ -249,7 +247,6 @@ async function updateAllPrices() {
   }
 
   try {
-    // Get all portfolio documents
     const portfoliosRef = db.collection('portfolios');
     const snapshot = await portfoliosRef.get();
     
@@ -260,7 +257,6 @@ async function updateAllPrices() {
     
     console.log(`Found ${snapshot.size} portfolio(s) to update.\n`);
     
-    // Collect all unique symbols across all users
     const allSymbols = new Set();
     const userPortfolios = [];
     
@@ -282,7 +278,6 @@ async function updateAllPrices() {
     
     console.log(`Unique symbols to fetch: ${Array.from(allSymbols).join(', ')}\n`);
     
-    // Fetch prices for all unique symbols
     const priceMap = new Map();
     const symbolArray = Array.from(allSymbols);
     
@@ -298,7 +293,6 @@ async function updateAllPrices() {
         console.error(`  Error fetching ${symbol}:`, error.message);
       }
       
-      // Small delay to be nice to the API (Finnhub allows 60/min, so 1 second is plenty)
       if (i < symbolArray.length - 1) {
         await delay(1000);
       }
@@ -306,7 +300,6 @@ async function updateAllPrices() {
     
     console.log(`\nFetched prices for ${priceMap.size} symbols.\n`);
     
-    // Update each user's portfolio
     for (const { userId, stocks, data, emailPreferences } of userPortfolios) {
       console.log(`Updating portfolio for user: ${userId.substring(0, 8)}...`);
       
@@ -322,10 +315,8 @@ async function updateAllPrices() {
           const oldPrice = stock.currentPrice;
           const oldHighest = stock.highestClose;
           
-          // Update current price
           stock.currentPrice = newPrice;
           
-          // Update highest close if new price is higher
           if (newPrice > (stock.highestClose || 0)) {
             stock.highestClose = newPrice;
             stock.highestCloseDate = today;
@@ -334,7 +325,6 @@ async function updateAllPrices() {
             console.log(`  ${symbol}: $${oldPrice?.toFixed(2) || 'N/A'} → $${newPrice.toFixed(2)}`);
           }
           
-          // Check if UM price triggered
           const umPrice = calculateUMPrice(stock.highestClose, stock.typicalVolatility, stock.volatilityMultiplier);
           if (newPrice <= umPrice && !stock.triggered) {
             stock.triggered = true;
@@ -349,7 +339,6 @@ async function updateAllPrices() {
       });
       
       if (updated) {
-        // Save back to Firestore
         await portfoliosRef.doc(userId).update({
           stocks: updatedStocks,
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
@@ -362,11 +351,11 @@ async function updateAllPrices() {
       // Send emails if preferences are set
       const userEmail = emailPreferences.emailAddress;
       const frequency = emailPreferences.summaryFrequency || 'none';
-      const dayOfWeek = new Date().getDay(); // 0 = Sunday, 5 = Friday
+      const dayOfWeek = new Date().getDay();
       const isFriday = dayOfWeek === 5;
       
-      if (userEmail && SENDGRID_API_KEY && frequency !== 'none') {
-        // Send trigger alerts for all options except 'none'
+      if (userEmail && RESEND_API_KEY && frequency !== 'none') {
+        // Send trigger alerts
         if (triggeredStocks.length > 0) {
           for (const { stock, umPrice } of triggeredStocks) {
             try {
