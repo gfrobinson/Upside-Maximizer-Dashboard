@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, AlertCircle, Plus, Trash2, Bell, Search, LogOut as LogOutIcon, User, HelpCircle, Settings, Mail, Edit3, Archive, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
+import { TrendingUp, AlertCircle, Plus, Trash2, Bell, Search, LogOut as LogOutIcon, User, HelpCircle, Settings, Mail, Edit3, Archive, ChevronDown, ChevronUp, CheckCircle, Info } from 'lucide-react';
 import { auth, savePortfolio, getPortfolio, subscribeToPortfolio, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import AuthModal from './AuthModal';
+import LandingPage from './LandingPage';
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showLanding, setShowLanding] = useState(false);
   const [stocks, setStocks] = useState([]);
   const [archivedStocks, setArchivedStocks] = useState([]);
   const [showArchive, setShowArchive] = useState(false);
@@ -352,7 +354,24 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-        {showAuthModal && <AuthModal onClose={() => {}} />}
+        <LandingPage onSignIn={() => setShowAuthModal(true)} />
+        {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} />}
+      </div>
+    );
+  }
+
+  if (showLanding) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+        <LandingPage onSignIn={() => setShowLanding(false)} />
+        <div className="fixed bottom-6 right-6 z-50">
+          <button
+            onClick={() => setShowLanding(false)}
+            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium shadow-lg transition-colors"
+          >
+            Back to Dashboard
+          </button>
+        </div>
       </div>
     );
   }
@@ -481,6 +500,9 @@ export default function App() {
               </div>
               <button onClick={() => setShowSettings(true)} className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors">
                 <Settings size={20} />
+              </button>
+              <button onClick={() => setShowLanding(true)} className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors" title="About">
+                <Info size={20} />
               </button>
               <button onClick={handleLogOut} className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors">
                 <LogOutIcon size={20} />
