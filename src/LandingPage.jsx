@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TrendingUp, ArrowRight, ChevronDown, ExternalLink, ArrowUpRight, Shield, RefreshCw, Bell } from 'lucide-react';
+import { TrendingUp, ArrowRight, ChevronDown, ArrowUpRight, Shield, RefreshCw, Bell } from 'lucide-react';
 
 export default function LandingPage({ onSignIn }) {
   const [showSampleCalc, setShowSampleCalc] = useState(false);
@@ -29,60 +29,28 @@ export default function LandingPage({ onSignIn }) {
 
       {/* Hero */}
       <section className="max-w-6xl mx-auto px-6 pt-16 pb-20 text-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-900/40 border border-emerald-700/50 rounded-full text-emerald-400 text-sm mb-6">
-          <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
-          Prices update automatically every weekday after market close
-        </div>
         <h1 className="text-5xl md:text-6xl font-bold mb-6 leading-tight tracking-tight">
           Protect Your Biggest<br />
           <span className="text-emerald-400">Winners</span>
         </h1>
-        <p className="text-slate-300 text-xl max-w-2xl mx-auto mb-10 leading-relaxed">
-          A simple dashboard to implement the <strong className="text-white">Upside Maximizer</strong> strategy — 
+        <p className="text-slate-300 text-xl max-w-2xl mx-auto mb-4 leading-relaxed">
+          A simple dashboard to implement the <strong className="text-white">Upside Maximizer</strong> strategy —
           a volatility-based trailing stop system designed to let winning stocks run while locking in gains.
         </p>
-        <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <button
-            onClick={onSignIn}
-            className="flex items-center justify-center gap-2 px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold text-lg transition-colors"
-          >
-            Get Started Free <ArrowRight size={18} />
-          </button>
+        <p className="text-slate-300 text-xl max-w-2xl mx-auto mb-10 leading-relaxed">
+          The strategy was developed by <strong className="text-white">Lobo Tiggre</strong>, founder of{' '}
+          <a href="https://independentspeculator.com" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2">
+            Independent Speculator
+          </a>. This app makes implementing UMs a breeze.{' '}
           <a
             href="https://independentspeculator.com/reports/upside-maximizer:-a-proven-buy-low-sell-high-strategy"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 px-8 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-semibold text-lg transition-colors border border-slate-600"
+            className="text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1"
           >
-            Read the Original Strategy <ExternalLink size={16} />
+            Read the full strategy writeup <ArrowUpRight size={14} />
           </a>
-        </div>
-      </section>
-
-      {/* Strategy Credit */}
-      <section className="max-w-6xl mx-auto px-6 pb-16">
-        <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-6 flex flex-col md:flex-row items-start md:items-center gap-4">
-          <div className="flex-shrink-0 w-12 h-12 bg-emerald-900/50 border border-emerald-700/50 rounded-full flex items-center justify-center">
-            <TrendingUp className="text-emerald-400" size={22} />
-          </div>
-          <div className="flex-1">
-            <p className="text-slate-300 leading-relaxed">
-              The Upside Maximizer strategy was developed by{' '}
-              <strong className="text-white">Lobo Tiggre</strong>, founder of{' '}
-              <a href="https://independentspeculator.com" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2">
-                Independent Speculator
-              </a>. This app makes implementing UMs a breeze — but the insight is his.{' '}
-              <a
-                href="https://independentspeculator.com/reports/upside-maximizer:-a-proven-buy-low-sell-high-strategy"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1"
-              >
-                Read the full strategy writeup <ArrowUpRight size={14} />
-              </a>
-            </p>
-          </div>
-        </div>
+        </p>
       </section>
 
       {/* How It Works */}
@@ -211,7 +179,7 @@ export default function LandingPage({ onSignIn }) {
       <section className="max-w-6xl mx-auto px-6 pb-20">
         <div className="bg-emerald-900/30 border border-emerald-700/50 rounded-xl p-10 text-center">
           <h2 className="text-3xl font-bold mb-3">Ready to protect your winners?</h2>
-          <p className="text-slate-300 mb-7 max-w-lg mx-auto">Sign up free and start tracking your positions in minutes. No credit card required.</p>
+          <p className="text-slate-300 mb-7 max-w-lg mx-auto">Sign up free and start tracking your positions in minutes.</p>
           <button
             onClick={onSignIn}
             className="inline-flex items-center gap-2 px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold text-lg transition-colors"
